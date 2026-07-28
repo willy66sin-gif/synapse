@@ -26,6 +26,10 @@ synapse/
 │   ├── main.py                 # FastAPI Entrypoint
 │   ├── airlock/                # Schema validation & fail-closed ingestion
 │   ├── core/                   # Deterministic Adjudication Engine (Pure functions)
+│   │   ├── rules.py            # Pure rule checks (authority, zone safety)
+│   │   ├── evaluator.py        # Pure adjudication orchestration
+│   │   ├── models.py           # SQLAlchemy ORM models (rule registry)
+│   │   └── repository.py       # PostgreSQL/Redis lookups (I/O boundary)
 │   ├── evidence/                # SHA-256 JSON-LD immutable log emitter
 │   └── config.py               # Environment & state configurations
 └── tests/
