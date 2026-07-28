@@ -36,16 +36,23 @@ trigger any delivery.
 
 ## Running it
 
-### Option A: Docker (per `docker-compose.yml`)
+### Option A: Docker (per `docker-compose.yml`) — verified working
 
 ```bash
-docker-compose up
+docker compose up --build
 ```
 
-This is the intended way to run the full stack (app + PostgreSQL + Redis) together.
-**Not yet verified on this development machine** — Docker isn't installed here. If
-you have Docker available, this is untested but should work as written; report back
-if it doesn't.
+Builds and starts all three containers (`app`, `db`, `cache`). Verified 2026-07-28:
+clean startup logs for all three, `pg_isready`/`redis-cli ping` healthy in-container,
+all three ports (5432/6379/8000) reachable from the host, and a real
+`POST /airlock/claims` request against the live stack returns a genuine signed
+`GO`/`NO_GO` response — no mocks involved.
+
+**Known gap**: a fresh `db` container has no tables. Nothing in this codebase runs a
+migration or calls `Base.metadata.create_all()` on startup, so `authorized_issuers`
+(and any future tables) must be created by hand before `/airlock/claims` can do
+anything but 500. See `CLAUDE.md`'s Open Items for the tracked decision (Alembic vs.
+a startup `create_all()` vs. an init script).
 
 ### Option B: Non-Docker local dev (verified working)
 
@@ -99,6 +106,6 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 
 ## Status
 
-36/36 tests passing on `master`. Known open items (see `CLAUDE.md`'s `## Open Items`
-for full detail): Docker path unverified on this machine; admin-override execution
-mechanism is proposed but not implemented.
+50/50 tests passing on `master`. Known open items (see `CLAUDE.md`'s `## Open Items`
+for full detail): admin-override HTTP endpoint/persistence layer not built; database
+schema provisioning has no migration mechanism; Maestro not wired into the live app.
