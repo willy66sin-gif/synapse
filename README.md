@@ -13,7 +13,8 @@ The full architecture, coding standards, and locked design decisions live in
   without the rule and failing condition; every channel supports both inbound query
   and outbound push; every alert states an escalation contact).
 - **`## Open Items`** — known gaps and pending proposals that are *not* locked yet
-  (currently: the admin-override execution mechanism).
+  (currently: whether ordinary claim adjudications, not just overrides, should also
+  push a Maestro alert).
 
 This README covers day-to-day operator concerns: running it, testing it, and where
 things stand. It doesn't restate the architecture — `CLAUDE.md` is authoritative for
@@ -29,10 +30,24 @@ Airlock (ingestion, fail-closed schema validation)
 
 `Maestro` (`src/maestro/`) is a separate, fully decoupled delivery layer that can turn
 an Evidence record into a channel-specific outbound alert (WhatsApp/Telegram stub
-adapters included). **As of this writing it is not wired into the live HTTP pipeline**
-— `src/airlock/router.py` does not call it. It exists as tested, standalone code; a
-real `POST /airlock/claims` today produces a signed evidence record but does not
-trigger any delivery.
+adapters included). **`src/airlock/router.py` still does not call it** — an ordinary
+`POST /airlock/claims` produces a signed evidence record but triggers no delivery.
+An accepted admin override *does* trigger a Maestro alert (see below) — that's the
+only live Maestro wiring so far.
+
+Both the adjudication and the override are now genuinely persisted (append-only) in
+PostgreSQL, not just emitted and forgotten — see `CLAUDE.md`'s Admin-Override
+Evidence Principle.
+
+### Admin override — `POST /supervisor/override`
+
+Accepts `{claim_id, issuer_id, justification, timestamp}`. Fail-closed like Airlock
+(422 on malformed input, extra fields forbidden, `justification` can't be empty).
+Business-logic rejections use real HTTP status codes rather than always-200 (unlike
+`/airlock/claims`, where NO_GO is itself a valid outcome): `403` if the issuer isn't
+a known authority, `404` if the claim has no adjudication record to override. On
+acceptance: signs a distinct `OverrideRecord` evidence entry, persists it, and sends
+a Maestro alert (both stub channels) announcing the override.
 
 ## Running it
 
@@ -104,8 +119,16 @@ pytest
 No Docker, no database, no `.env` file, and no other undocumented setup required —
 `src/core/`'s adjudication logic is pure and stateless by design (`CLAUDE.md`'s
 Developer Directives), so the suite runs entirely offline. Verified clean from a
-fresh clone, in reversed file order, and across multiple random seeds (36/36 passing
-every time, no ordering dependencies).
+fresh clone, in reversed file order, and across multiple random seeds (no ordering
+dependencies, at the 36/36-test count that was current at the time).
+
+The new `src/evidence/repository.py` and `src/supervisor/repository.py` I/O
+functions are deliberately *not* unit-tested with mocks — consistent with
+`src/core/repository.py`'s existing functions, which never had direct unit tests
+either. The automated suite covers `POST /supervisor/override`'s branching logic via
+a stub session (see `tests/test_supervisor_router.py`); the actual database writes
+are verified live, against real Docker containers, the same way `/airlock/claims`
+always has been.
 
 `pytest.ini` sets `pythonpath = .` — this is required because `tests/` has no
 `__init__.py`; without it, `from src...` imports fail when pytest is run from the
@@ -118,6 +141,6 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 
 ## Status
 
-50/50 tests passing on `master`. Known open items (see `CLAUDE.md`'s `## Open Items`
-for full detail): admin-override HTTP endpoint/persistence layer not built; Maestro
-not wired into the live app.
+54/54 tests passing on `master`. Known open item (see `CLAUDE.md`'s `## Open Items`
+for full detail): whether ordinary `/airlock/claims` adjudications, not just
+overrides, should also push a Maestro alert.

@@ -4,11 +4,17 @@ uvicorn, via the Dockerfile's CMD. Not imported by src/main.py or any
 other app module, so it has zero effect on the FastAPI app's lifespan
 or on the test suite (TestClient never touches this file).
 
-Calls Base.metadata.create_all() against src/core/models.py's schema —
-the single source of truth for table definitions, so there's no
-second copy of the schema to drift out of sync. create_all() is
-idempotent (only creates tables that don't already exist), so this is
-safe to run on every container start, not just the first.
+Calls Base.metadata.create_all() against src/core/models.py's shared
+declarative Base. create_all() is idempotent (only creates tables
+that don't already exist), so this is safe to run on every container
+start, not just the first.
+
+SQLAlchemy only registers a table on Base.metadata when its model
+class has actually been imported somewhere — so every models.py in
+the app (src/core/models.py, src/evidence/models.py,
+src/supervisor/models.py) must be imported here, even though none of
+their classes are referenced directly below, or their tables silently
+never get created.
 
 This is schema *creation*, not a migration tool. Deliberate choice for
 this project's stage: no production data, no schema-evolution history,
@@ -30,6 +36,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import settings
 from src.core.models import Base
+from src.evidence import models as _evidence_models  # noqa: F401 - imported for its table-registration side effect
+from src.supervisor import models as _supervisor_models  # noqa: F401 - imported for its table-registration side effect
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY_SECONDS = 2

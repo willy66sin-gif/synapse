@@ -18,6 +18,7 @@ from src.core.repository import (
     get_redis_client,
 )
 from src.evidence.emitter import emit_evidence
+from src.evidence.repository import persist_adjudication_record
 
 router = APIRouter(prefix="/airlock", tags=["airlock"])
 
@@ -33,10 +34,15 @@ async def submit_claim(
     a malformed body is rejected before this function body runs.
 
     Wires the full pipeline: fetch issuer/zone state -> adjudicate
-    (pure) -> emit signed evidence record.
+    (pure) -> emit signed evidence record -> persist it, so a
+    subsequent admin-override request has something real to check
+    "does this claim exist" against.
     """
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
     zone_record = await fetch_zone_record(redis_client, claim.zone_id)
 
     verdict = adjudicate(claim, issuer_record, zone_record)
-    return emit_evidence(claim.model_dump(mode="json"), verdict)
+    evidence = emit_evidence(claim.model_dump(mode="json"), verdict)
+    await persist_adjudication_record(session, evidence)
+
+    return evidence
