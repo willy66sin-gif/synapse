@@ -21,12 +21,15 @@ FAILING_RULE = RuleConditionResult(
     reason="Safety Violation: Zone 'ZONE-02' does not exist.",
 )
 
+ESCALATION_CONTACT = "Site Superintendent: +1-555-0100"
+
 GO_ALERT = OutboundAlert(
     claim_id="CLM-101",
     decision="GO",
     rule_trace=[PASSING_RULE],
     evaluated_at="2026-07-27T10:00:00+00:00",
     recipient_id="+15551234567",
+    escalation_contact=ESCALATION_CONTACT,
 )
 
 NO_GO_ALERT = OutboundAlert(
@@ -36,6 +39,7 @@ NO_GO_ALERT = OutboundAlert(
     conflicting_condition=FAILING_RULE,
     evaluated_at="2026-07-27T10:05:00+00:00",
     recipient_id="+15551234567",
+    escalation_contact=ESCALATION_CONTACT,
 )
 
 ADAPTERS = [WhatsAppAdapter(), TelegramAdapter()]
@@ -58,6 +62,16 @@ def test_send_alert_never_hides_the_failing_condition(adapter):
     assert result.delivered is True
     assert "zone_safety_check" in result.detail
     assert "Safety Violation" in result.detail
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.channel_name)
+def test_send_alert_states_escalation_contact_for_go_and_no_go(adapter):
+    """Escalation Requirement: every alert states how to escalate, regardless of decision."""
+    go_result = adapter.send_alert(GO_ALERT)
+    no_go_result = adapter.send_alert(NO_GO_ALERT)
+
+    assert ESCALATION_CONTACT in go_result.detail
+    assert ESCALATION_CONTACT in no_go_result.detail
 
 
 def test_whatsapp_parses_real_cloud_api_webhook_shape():

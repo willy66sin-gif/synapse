@@ -9,9 +9,13 @@ some channel — but even Maestro's own contract (this module) stays
 channel-agnostic. WhatsApp/Telegram specifics live only in
 src/maestro/adapters/.
 
-OutboundAlert also encodes the Supervisor UI design principle: never
-a standalone verdict. GO/NO_GO is always paired with the full rule
-trace, and a NO_GO always carries the specific failing condition.
+OutboundAlert also encodes two of CLAUDE.md's Locked Design
+Principles: the Supervisor UI Principle (never a standalone verdict —
+GO/NO_GO is always paired with the full rule trace, and a NO_GO always
+carries the specific failing condition), and the Escalation
+Requirement (every alert, GO or NO_GO, must carry a contact point for
+requesting an override — Maestro only ever displays it, never acts on
+it).
 """
 from typing import Literal, Optional
 
@@ -43,6 +47,7 @@ class OutboundAlert(BaseModel):
     conflicting_condition: Optional[RuleConditionResult] = None
     evaluated_at: str
     recipient_id: str
+    escalation_contact: str
 
     @model_validator(mode="after")
     def _conflicting_condition_matches_decision(self) -> "OutboundAlert":
@@ -53,13 +58,15 @@ class OutboundAlert(BaseModel):
         return self
 
     @classmethod
-    def from_evidence_record(cls, evidence: dict, recipient_id: str) -> "OutboundAlert":
+    def from_evidence_record(cls, evidence: dict, recipient_id: str, escalation_contact: str) -> "OutboundAlert":
         """
         Builds an OutboundAlert from a src/evidence/emitter.py record.
         Takes a plain dict (the emitted evidence shape) rather than
         importing src.evidence directly, so Maestro depends on
         Evidence's output shape without Evidence ever knowing Maestro
-        exists.
+        exists. escalation_contact is operational contact info, not
+        part of adjudication, so it can't be derived from the evidence
+        record — it must be supplied by the caller.
         """
         rule_trace = [RuleConditionResult(**rule) for rule in evidence["rule_trace"]]
         conflicting = None
@@ -73,6 +80,7 @@ class OutboundAlert(BaseModel):
             conflicting_condition=conflicting,
             evaluated_at=evidence["evaluated_at"],
             recipient_id=recipient_id,
+            escalation_contact=escalation_contact,
         )
 
 

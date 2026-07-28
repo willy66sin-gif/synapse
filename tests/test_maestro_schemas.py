@@ -3,8 +3,10 @@ Channel-agnostic Maestro schema tests.
 
 Covers: valid GO/NO_GO construction, building from a real
 evidence/emitter.py record (the actual downstream boundary), and the
-fail-closed validation that a decision must always carry a matching
-conflicting_condition — never a standalone verdict.
+fail-closed validation of CLAUDE.md's Locked Design Principles — a
+decision must always carry a matching conflicting_condition (never a
+standalone verdict), and every alert must carry an escalation_contact
+(Escalation Requirement).
 """
 import pytest
 from pydantic import ValidationError
@@ -25,6 +27,8 @@ FAILING_RULE = RuleConditionResult(
     reason="Safety Violation: Zone 'ZONE-02' does not exist.",
 )
 
+ESCALATION_CONTACT = "Site Superintendent: +1-555-0100"
+
 
 def test_go_alert_without_conflicting_condition_is_valid():
     alert = OutboundAlert(
@@ -34,10 +38,12 @@ def test_go_alert_without_conflicting_condition_is_valid():
         conflicting_condition=None,
         evaluated_at="2026-07-27T10:00:00+00:00",
         recipient_id="+15551234567",
+        escalation_contact=ESCALATION_CONTACT,
     )
 
     assert alert.decision == "GO"
     assert alert.conflicting_condition is None
+    assert alert.escalation_contact == ESCALATION_CONTACT
 
 
 def test_no_go_alert_requires_conflicting_condition():
@@ -48,6 +54,7 @@ def test_no_go_alert_requires_conflicting_condition():
         conflicting_condition=FAILING_RULE,
         evaluated_at="2026-07-27T10:05:00+00:00",
         recipient_id="+15551234567",
+        escalation_contact=ESCALATION_CONTACT,
     )
 
     assert alert.decision == "NO_GO"
@@ -64,6 +71,7 @@ def test_no_go_without_conflicting_condition_is_rejected():
             conflicting_condition=None,
             evaluated_at="2026-07-27T10:05:00+00:00",
             recipient_id="+15551234567",
+            escalation_contact=ESCALATION_CONTACT,
         )
 
 
@@ -77,6 +85,19 @@ def test_go_with_conflicting_condition_is_rejected():
             conflicting_condition=FAILING_RULE,
             evaluated_at="2026-07-27T10:00:00+00:00",
             recipient_id="+15551234567",
+            escalation_contact=ESCALATION_CONTACT,
+        )
+
+
+def test_missing_escalation_contact_is_rejected():
+    """Fail-closed: CLAUDE.md's Escalation Requirement applies to every alert, GO or NO_GO."""
+    with pytest.raises(ValidationError):
+        OutboundAlert(
+            claim_id="CLM-101",
+            decision="GO",
+            rule_trace=[PASSING_RULE],
+            evaluated_at="2026-07-27T10:00:00+00:00",
+            recipient_id="+15551234567",
         )
 
 
@@ -88,6 +109,7 @@ def test_extra_fields_forbidden():
             rule_trace=[PASSING_RULE],
             evaluated_at="2026-07-27T10:00:00+00:00",
             recipient_id="+15551234567",
+            escalation_contact=ESCALATION_CONTACT,
             unexpected_field="nope",
         )
 
@@ -102,11 +124,14 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     )
     evidence = emit_evidence(claim_payload, verdict)
 
-    alert = OutboundAlert.from_evidence_record(evidence, recipient_id="+15551234567")
+    alert = OutboundAlert.from_evidence_record(
+        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
+    )
 
     assert alert.decision == "GO"
     assert alert.conflicting_condition is None
     assert alert.claim_id == "CLM-101"
+    assert alert.escalation_contact == ESCALATION_CONTACT
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():
@@ -118,11 +143,14 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
     )
     evidence = emit_evidence(claim_payload, verdict)
 
-    alert = OutboundAlert.from_evidence_record(evidence, recipient_id="+15551234567")
+    alert = OutboundAlert.from_evidence_record(
+        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
+    )
 
     assert alert.decision == "NO_GO"
     assert alert.conflicting_condition is not None
     assert "Safety Violation" in alert.conflicting_condition.reason
+    assert alert.escalation_contact == ESCALATION_CONTACT
 
 
 def _claim(claim_id: str, issuer_id: str, zone_id: str = "ZONE-01"):
