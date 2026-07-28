@@ -12,6 +12,9 @@
 - Hybrid Surface Design: Every delivery channel supports two directions — inbound (a requester queries the status of a claim) and outbound (Synapse pushes a GO/NO-GO alert unprompted). A channel adapter is incomplete unless it implements both.
 - Escalation Requirement: Every rendered GO/NO-GO alert must state how to escalate — who or what contact point to reach for an override — regardless of channel. Maestro and its channel adapters only ever display this contact information; they never execute an override themselves. Overriding a verdict is a human action outside Core/Maestro's scope.
 
+## Open Items
+- Admin-override execution mechanism — not yet designed or implemented. The Escalation Requirement (above) already scopes override *execution* out of Core and Maestro ("a human action outside Core/Maestro's scope"); `OutboundAlert.escalation_contact` (src/maestro/schemas.py) satisfies the "state how to reach someone" half of that. Undecided: where the override action itself is performed (candidate: a separate supervisor web UI / admin endpoint, not part of src/maestro/ or src/core/), how it's authenticated, and how an override event gets recorded through src/evidence/ for the audit trail. Needs a dedicated design pass before implementation.
+
 ## Technology Stack & Infrastructure
 - Language & Runtime: Python 3.11+
 - API Framework: FastAPI (Async, strict Pydantic v2 validation models)
