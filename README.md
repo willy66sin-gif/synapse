@@ -48,11 +48,23 @@ all three ports (5432/6379/8000) reachable from the host, and a real
 `POST /airlock/claims` request against the live stack returns a genuine signed
 `GO`/`NO_GO` response — no mocks involved.
 
-**Known gap**: a fresh `db` container has no tables. Nothing in this codebase runs a
-migration or calls `Base.metadata.create_all()` on startup, so `authorized_issuers`
-(and any future tables) must be created by hand before `/airlock/claims` can do
-anything but 500. See `CLAUDE.md`'s Open Items for the tracked decision (Alembic vs.
-a startup `create_all()` vs. an init script).
+Schema is provisioned automatically — `src/core/init_db.py` runs on every container
+start (wired into the `Dockerfile`'s `CMD`, before `uvicorn`), calling
+`Base.metadata.create_all()` against `src/core/models.py`. A genuinely fresh
+`docker compose down -v && docker compose up --build` (empty volumes) produces a
+working, queryable schema with zero manual steps — verified 2026-07-28.
+
+No data is seeded automatically. If you want something to submit a claim against
+without hand-crafting SQL/redis-cli commands, run the optional, separate dev-seed
+script once the stack is up:
+
+```bash
+python scripts/seed_dev_data.py
+```
+
+This inserts one `AuthorizedIssuer` row and one Redis zone record. It's never run
+automatically by Docker or the app itself — see `CLAUDE.md`'s Schema Provisioning
+Principle for why seed data and schema creation are kept deliberately separate.
 
 ### Option B: Non-Docker local dev (verified working)
 
@@ -107,5 +119,5 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 ## Status
 
 50/50 tests passing on `master`. Known open items (see `CLAUDE.md`'s `## Open Items`
-for full detail): admin-override HTTP endpoint/persistence layer not built; database
-schema provisioning has no migration mechanism; Maestro not wired into the live app.
+for full detail): admin-override HTTP endpoint/persistence layer not built; Maestro
+not wired into the live app.
