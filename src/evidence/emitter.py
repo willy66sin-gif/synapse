@@ -10,6 +10,12 @@ envelope, adapted to carry our Verdict shape (decision + reason +
 rule_trace) instead of a bare (Verdict, reason) tuple. Storage backend
 (Postgres write, file, etc.) is not wired up here — this function only
 produces the signed record; persisting it is a caller concern.
+
+emit_override_evidence() signs a distinct record type for admin
+overrides (src/supervisor/), using the same mechanism. It is purely
+additive: it has no way to modify, replace, or remove an existing
+AdjudicationRecord — the two record types coexist in the audit trail,
+linked only by claim_id.
 """
 import hashlib
 import json
@@ -32,6 +38,31 @@ def emit_evidence(claim_payload: dict, verdict: Verdict) -> dict:
         "rule_trace": verdict["rule_trace"],
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "input_payload": claim_payload,
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_override_evidence(override: dict) -> dict:
+    """
+    Signs an admin-override event as its own distinct record type,
+    via the same SHA-256/JSON-LD mechanism as emit_evidence(). Takes a
+    plain dict (the validated src/supervisor/schemas.py OverrideRecord,
+    dumped) rather than importing that type directly, so this module
+    stays decoupled from src/supervisor/ exactly as it already stays
+    decoupled from src/maestro/.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "OverrideRecord",
+        "claim_id": override["claim_id"],
+        "issuer_id": override["issuer_id"],
+        "justification": override["justification"],
+        "override_timestamp": override["timestamp"],
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 
     serialized = json.dumps(record, sort_keys=True).encode("utf-8")
