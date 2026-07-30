@@ -77,3 +77,6 @@ synapse/
 - Implement, do not redesign. Architectural boundaries above are locked.
 - Any payload missing required schema fields or failing validation MUST return HTTP 422 / Schema Error immediately — no silent defaults, no best-effort parsing.
 - Keep `src/core/` pure, deterministic, and testable without database side-effects during evaluation.
+
+## Changelog
+- 2026-07-30 — Merged `feature/eptw-precondition-gate` into `master` via fast-forward (no other branches had diverged from `master` since the feature branch was created). Merge commit: `7b00607083f14c616c40400cf22c9f18786e2d6e`. Full pytest suite: 68/68 passing, re-run against merged `master` (not just the feature branch in isolation). Remote branch cleanup: local and remote `feature/eptw-precondition-gate` left in place per no explicit deletion request; `master` pushed to `origin/master` at the same commit.
