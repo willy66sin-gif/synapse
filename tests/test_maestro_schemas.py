@@ -164,4 +164,5 @@ def _claim(claim_id: str, issuer_id: str, zone_id: str = "ZONE-01"):
         zone_id=zone_id,
         action_type="MATERIAL_ENTRY",
         payload_data={"truck_id": "SG1234A", "weight_tons": 12.5},
+        work_type="NOMINAL_CIVIL",
     )

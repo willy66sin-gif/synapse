@@ -13,12 +13,23 @@ src/core/repository.py) — `adjudicate` only ever receives the
 already-resolved records (or None), so it stays a pure function that
 is testable without any database/cache side-effects, per CLAUDE.md's
 Developer Directives.
+
+Rule 0 (verify_ptw_precondition, the ePTW gate) runs before Rule 1
+(authority) and Rule 2 (zone safety) — a claim for high-risk work with
+no valid permit is rejected before Core ever considers who submitted
+it or where.
 """
 from dataclasses import asdict
 from typing import Optional, TypedDict
 
 from src.airlock.schemas import ClaimPayload
-from src.core.rules import IssuerRecord, ZoneRecord, check_authority, check_zone_safety
+from src.core.rules import (
+    IssuerRecord,
+    ZoneRecord,
+    check_authority,
+    check_zone_safety,
+    verify_ptw_precondition,
+)
 
 
 class Verdict(TypedDict):
@@ -26,6 +37,7 @@ class Verdict(TypedDict):
     decision: str  # "GO" | "NO_GO"
     reason: str
     rule_trace: list[dict]
+    reason_code: Optional[str]  # machine-readable failure code; None unless a specific gate sets one
 
 
 def adjudicate(
@@ -34,11 +46,24 @@ def adjudicate(
     zone_record: Optional[ZoneRecord],
 ) -> Verdict:
     """
-    Evaluates a validated claim against Rule 1 (authority) then Rule 2
-    (zone safety), short-circuiting NO_GO on the first failed rule —
-    same control flow as synapse_mdm.py's `adjudicate`.
+    Evaluates a validated claim against Rule 0 (ePTW precondition),
+    then Rule 1 (authority), then Rule 2 (zone safety), short-
+    circuiting NO_GO on the first failed rule — same control flow as
+    synapse_mdm.py's `adjudicate`, extended with the ePTW gate ahead
+    of it.
     """
     rule_trace: list[dict] = []
+
+    ptw_outcome = verify_ptw_precondition(claim)
+    rule_trace.append(asdict(ptw_outcome))
+    if not ptw_outcome.passed:
+        return Verdict(
+            claim_id=claim.claim_id,
+            decision="NO_GO",
+            reason=ptw_outcome.reason,
+            rule_trace=rule_trace,
+            reason_code="FAIL_CLOSED_EPTW_PRECONDITION",
+        )
 
     authority_outcome = check_authority(claim, issuer_record)
     rule_trace.append(asdict(authority_outcome))
@@ -48,6 +73,7 @@ def adjudicate(
             decision="NO_GO",
             reason=authority_outcome.reason,
             rule_trace=rule_trace,
+            reason_code=None,
         )
 
     zone_outcome = check_zone_safety(claim, zone_record)
@@ -58,6 +84,7 @@ def adjudicate(
             decision="NO_GO",
             reason=zone_outcome.reason,
             rule_trace=rule_trace,
+            reason_code=None,
         )
 
     return Verdict(
@@ -65,4 +92,5 @@ def adjudicate(
         decision="GO",
         reason=f"Claim '{claim.claim_id}' cleared for execution in {claim.zone_id}.",
         rule_trace=rule_trace,
+        reason_code=None,
     )

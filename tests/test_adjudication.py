@@ -31,6 +31,7 @@ def _claim(**overrides) -> ClaimPayload:
         "zone_id": "ZONE-01",
         "action_type": "MATERIAL_ENTRY",
         "payload_data": {"truck_id": "SG1234A", "weight_tons": 12.5},
+        "work_type": "NOMINAL_CIVIL",  # bypasses the ePTW gate — these tests predate it
     }
     base.update(overrides)
     return ClaimPayload(**base)

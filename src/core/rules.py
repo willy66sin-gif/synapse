@@ -13,11 +13,17 @@ src/core/repository.py resolves from PostgreSQL / Redis. These
 functions never do that resolution themselves — they only ever see
 already-fetched records (or None), which is what keeps them pure and
 testable without any database/cache side-effects.
+
+verify_ptw_precondition (Rule 0: ePTW Precondition Check) needs no
+externally-resolved record at all — the permit context travels inside
+the claim itself (ClaimPayload.ptw_context), submitted directly by the
+caller — so it stays pure with zero dependencies beyond the claim.
 """
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
-from src.airlock.schemas import ClaimPayload
+from src.airlock.schemas import ClaimPayload, WorkType
 
 
 @dataclass(frozen=True)
@@ -79,3 +85,88 @@ def check_zone_safety(claim: ClaimPayload, zone_record: Optional[ZoneRecord]) ->
         )
 
     return RuleOutcome(rule_id="zone_safety_check", passed=True, reason="Zone Safety Validated")
+
+
+HIGH_RISK_WORK_TYPES = frozenset(
+    {WorkType.EXCAVATION, WorkType.LIFTING, WorkType.HOT_WORK, WorkType.CONFINED_SPACE}
+)
+
+
+def verify_ptw_precondition(claim: ClaimPayload) -> RuleOutcome:
+    """
+    Rule 0: ePTW Precondition Check. Gatekeeper — src/core/evaluator.py
+    runs this before Rule 1 (authority) and Rule 2 (zone safety).
+
+    NOMINAL_CIVIL work bypasses this gate transparently. Each of the
+    four high-risk work types requires a PtwContext that is present,
+    APPROVED, within its valid window, and matching on both zone_id
+    and permit_type — or the claim fails closed.
+    """
+    if claim.work_type not in HIGH_RISK_WORK_TYPES:
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=True,
+            reason=f"No permit required for work_type '{claim.work_type.value}'.",
+        )
+
+    ctx = claim.ptw_context
+
+    if ctx is None:
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided "
+                f"for high-risk work_type '{claim.work_type.value}'."
+            ),
+        )
+
+    if ctx.status != "APPROVED":
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' status "
+                f"'{ctx.status}' is not APPROVED."
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+    valid_from = datetime.fromisoformat(ctx.valid_from)
+    valid_until = datetime.fromisoformat(ctx.valid_until)
+    if now < valid_from or now > valid_until:
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' is outside its "
+                f"valid window ({ctx.valid_from} to {ctx.valid_until})."
+            ),
+        )
+
+    if ctx.zone_id != claim.zone_id:
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' zone "
+                f"'{ctx.zone_id}' does not match claim zone '{claim.zone_id}'."
+            ),
+        )
+
+    if ctx.permit_type != claim.work_type:
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' type "
+                f"'{ctx.permit_type.value}' does not match claimed work_type "
+                f"'{claim.work_type.value}'."
+            ),
+        )
+
+    return RuleOutcome(
+        rule_id="ptw_precondition_check",
+        passed=True,
+        reason=f"Permit '{ctx.ptw_id}' validated for '{claim.work_type.value}'.",
+    )
