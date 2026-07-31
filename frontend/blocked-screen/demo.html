@@ -27,12 +27,16 @@
         decision: "NO_GO",
         reason: "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'EXCAVATION'.",
         reason_code: "R-PTW-01",
+        // Real DIRECTORY_MAP (src/maestro/directory.py) has exactly one entry
+        // today — the ("*", "*") catch-all — so every real claim resolves here.
+        authority_binding_id: "BIND-999",
         rule_trace: [
           { rule_id: "ptw_precondition_check", passed: false, reason: "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'EXCAVATION'." },
         ],
         evaluated_at: "2026-07-31T10:00:00+00:00",
       },
       escalationContact: "Site Superintendent: +1-555-0100",
+      assignedRole: "General Duty Officer",
       telemetrySigned: true,
       overrideEndpoint: "/supervisor/override",
       issuerId: "",
@@ -44,6 +48,7 @@
         decision: "NO_GO",
         reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated.",
         reason_code: "R-AUTH-01",
+        authority_binding_id: "BIND-999",
         rule_trace: [
           { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
           { rule_id: "authority_check", passed: false, reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated." },
@@ -51,6 +56,8 @@
         evaluated_at: "2026-07-31T10:05:00+00:00",
       },
       escalationContact: "",
+      // assignedRole intentionally omitted here too, alongside escalationContact —
+      // this fixture demonstrates the component's fallback text for both.
       telemetrySigned: false,
     };
 
@@ -60,6 +67,10 @@
         decision: "GO",
         reason: "Claim 'CLM-101' cleared for execution in ZONE-01.",
         reason_code: null,
+        // GO verdicts never get authority resolved (emit_evidence() only
+        // receives an authority_binding_id when decision is NO_GO) — null here
+        // matches the real persisted evidence shape, not an omission.
+        authority_binding_id: null,
         rule_trace: [
           { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
           { rule_id: "authority_check", passed: true, reason: "Authority Validated" },

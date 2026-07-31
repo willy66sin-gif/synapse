@@ -25,10 +25,15 @@
  *       decision: "GO" | "NO_GO",
  *       reason: string,
  *       reason_code: string | null,
+ *       authority_binding_id: string | null,  // real, persisted (src/maestro/directory.py's AuthorityBinding.binding_id) — null on GO
  *       rule_trace: Array<{ rule_id: string, passed: boolean, reason: string }>,
  *       evaluated_at: string,
  *     },
  *     escalationContact: string,   // supplied by caller, mirrors OutboundAlert.escalation_contact
+ *     assignedRole: string | null | undefined,  // mirrors OutboundAlert.assigned_role — NOT persisted in
+ *                                                // evidence (only authority_binding_id is), so callers that
+ *                                                // only have the evidence record (not a live-resolved
+ *                                                // OutboundAlert) may leave this unset
  *     telemetrySigned: boolean | undefined,  // PLACEHOLDER — see README caveat
  *     overrideEndpoint: string,    // defaults to "/supervisor/override"
  *     issuerId: string,            // pre-fills the override form's issuer_id, if known
@@ -89,6 +94,7 @@ class BlockedScreen extends HTMLElement {
         <div class="escalation">
           <strong>Escalate / request override:</strong>
           <span>${escapeHtml(data.escalationContact || "No escalation contact provided.")}</span>
+          ${this._renderAuthorityBinding(evidence.authority_binding_id, data.assignedRole)}
         </div>
 
         ${this._renderOverrideForm(evidence.claim_id, data.issuerId)}
@@ -113,6 +119,14 @@ class BlockedScreen extends HTMLElement {
         <p class="reason">${escapeHtml(conflicting.reason)}</p>
       </div>
     `;
+  }
+
+  _renderAuthorityBinding(authorityBindingId, assignedRole) {
+    if (!authorityBindingId && !assignedRole) return "";
+    const parts = [];
+    if (assignedRole) parts.push(escapeHtml(assignedRole));
+    if (authorityBindingId) parts.push(`(${escapeHtml(authorityBindingId)})`);
+    return `<div>Escalation owner: ${parts.join(" ")}</div>`;
   }
 
   _renderRule(rule) {

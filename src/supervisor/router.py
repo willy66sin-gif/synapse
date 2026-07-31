@@ -27,8 +27,28 @@ valid adjudication outcome, always 200), a rejected override here
 means the administrative action did not happen at all — so it uses
 real HTTP semantics: 403 for an unauthenticated issuer, 404 for a
 claim with no adjudication record to override.
+
+GET /supervisor/blocked/{claim_id} (2026-07-31): serves
+frontend/blocked-screen/'s <blocked-screen> component populated with
+the real, persisted evidence record for claim_id — not the component's
+standalone demo fixture. Fetches via the same
+fetch_latest_adjudication_record() this file already uses for the
+override flow above, same pattern. 404 if the claim was never
+adjudicated; 409 if it was but the decision was GO (the Blocked Screen
+is a NO_GO-only surface — a claim existing with the wrong decision is
+a different failure mode than not existing at all, so it gets a
+different status code). Deliberately does not call
+src/maestro/directory.py's resolve_authority() — that's Maestro's job
+when building an OutboundAlert for an actual alert, out of scope here;
+this route only ever surfaces authority_binding_id, which is already
+part of the persisted evidence record itself (None on GO, which this
+route never serves anyway).
 """
+import html
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository import fetch_issuer_record, get_db_session
@@ -42,6 +62,8 @@ from src.supervisor.repository import persist_override_record
 from src.supervisor.schemas import OverrideRecord
 
 router = APIRouter(prefix="/supervisor", tags=["supervisor"])
+
+BLOCKED_SCREEN_JS_URL = "/static/blocked-screen/blocked-screen.js"
 
 
 @router.post("/override")
@@ -78,3 +100,63 @@ async def submit_override(
         "evidence": evidence,
         "notifications": [result.model_dump() for result in notifications],
     }
+
+
+@router.get("/blocked/{claim_id}", response_class=HTMLResponse)
+async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_session)) -> HTMLResponse:
+    evidence = await fetch_latest_adjudication_record(session, claim_id)
+
+    if evidence is None:
+        raise HTTPException(status_code=404, detail=f"No adjudication record found for claim '{claim_id}'.")
+
+    if evidence["decision"] != "NO_GO":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Claim '{claim_id}' is not blocked (decision={evidence['decision']}) — nothing to show.",
+        )
+
+    blocked_screen_data = {
+        "evidence": {
+            "claim_id": evidence["claim_id"],
+            "decision": evidence["decision"],
+            "reason": evidence["reason"],
+            "reason_code": evidence["reason_code"],
+            "authority_binding_id": evidence.get("authority_binding_id"),
+            "rule_trace": evidence["rule_trace"],
+            "evaluated_at": evidence["evaluated_at"],
+        },
+        "escalationContact": "Your site supervisor",
+        "issuerId": evidence.get("input_payload", {}).get("issuer_id", ""),
+        "overrideEndpoint": "/supervisor/override",
+    }
+
+    return HTMLResponse(_render_blocked_screen_page(blocked_screen_data))
+
+
+def _render_blocked_screen_page(data: dict) -> str:
+    """
+    Renders a standalone page hosting <blocked-screen>, fed real data
+    via a JSON hand-off (safer than templating individual fields into
+    markup, and the component's own _render() already HTML-escapes
+    everything it interpolates — see blocked-screen.js). The `<` ->
+    `\\u003c` replacement stops any string field (e.g. reason text
+    built from user-submitted zone_id/ptw_id) from prematurely closing
+    the <script> tag it's embedded in.
+    """
+    claim_id = html.escape(data["evidence"]["claim_id"])
+    payload = json.dumps(data).replace("<", "\\u003c")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Blocked — {claim_id}</title>
+</head>
+<body>
+  <blocked-screen id="screen"></blocked-screen>
+  <script type="module" src="{BLOCKED_SCREEN_JS_URL}"></script>
+  <script type="module">
+    document.getElementById("screen").data = {payload};
+  </script>
+</body>
+</html>"""
