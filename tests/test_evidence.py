@@ -20,6 +20,15 @@ VERDICT: Verdict = {
     "decision": "GO",
     "reason": "Claim 'test-1' cleared for execution in ZONE-01.",
     "rule_trace": [{"rule_id": "authority_check", "passed": True, "reason": "Authority Validated"}],
+    "reason_code": None,
+}
+
+NO_GO_VERDICT: Verdict = {
+    "claim_id": "test-2",
+    "decision": "NO_GO",
+    "reason": "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'EXCAVATION'.",
+    "rule_trace": [{"rule_id": "ptw_precondition_check", "passed": False, "reason": "no permit"}],
+    "reason_code": "R-PTW-01",
 }
 
 OVERRIDE = {
@@ -102,3 +111,33 @@ def test_override_evidence_does_not_mutate_original_adjudication_record():
     emit_override_evidence(OVERRIDE)
 
     assert original == original_snapshot
+
+
+def test_emit_evidence_carries_none_reason_code_for_go_verdict():
+    result = emit_evidence(CLAIM_PAYLOAD, VERDICT)
+
+    assert result["reason_code"] is None
+
+
+def test_emit_evidence_threads_specific_reason_code_for_no_go_verdict():
+    """A PTW-rejected claim's persisted evidence must carry the specific
+    failure reason, not just decision="NO_GO" indistinguishable from any
+    other rejection."""
+    result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT)
+
+    assert result["decision"] == "NO_GO"
+    assert result["reason_code"] == "R-PTW-01"
+
+
+def test_emit_evidence_reason_code_is_included_in_the_signed_payload():
+    """The signature must cover reason_code too — tampering with it must
+    invalidate the signature, same guarantee as any other field."""
+    result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT)
+
+    tampered = dict(result)
+    tampered["reason_code"] = "R-AUTH-01"
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]

@@ -181,7 +181,7 @@ def test_adjudicate_rejects_before_authority_check_even_runs():
     verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE)
 
     assert verdict["decision"] == "NO_GO"
-    assert verdict["reason_code"] == "FAIL_CLOSED_EPTW_PRECONDITION"
+    assert verdict["reason_code"] == "R-PTW-01"
     assert len(verdict["rule_trace"]) == 1
     assert verdict["rule_trace"][0]["rule_id"] == "ptw_precondition_check"
 

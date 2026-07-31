@@ -49,6 +49,14 @@ class RuleOutcome:
     reason: str
 
 
+# Machine-readable failure codes for Verdict.reason_code (src/core/evaluator.py).
+# Convention: R-<DOMAIN>-<NUMBER>, one per rule/failure class — not per individual
+# sub-condition within a rule (e.g. every ePTW sub-check still reports R-PTW-01).
+REASON_CODE_PTW_PRECONDITION = "R-PTW-01"
+REASON_CODE_AUTHORITY_FAILURE = "R-AUTH-01"
+REASON_CODE_ZONE_SAFETY_FAILURE = "R-ZONE-01"
+
+
 def check_authority(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) -> RuleOutcome:
     """Rule 1: Authority Check (synapse_mdm.py `adjudicate`, Rule 1)."""
     if issuer_record is None:

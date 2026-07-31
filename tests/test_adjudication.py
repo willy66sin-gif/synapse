@@ -46,6 +46,7 @@ def test_nominal_claim_is_cleared():
     assert verdict["decision"] == "GO"
     assert verdict["claim_id"] == "CLM-101"
     assert all(rule["passed"] for rule in verdict["rule_trace"])
+    assert verdict["reason_code"] is None
 
 
 def test_lift_operation_in_high_hazard_zone_is_blocked():
@@ -61,6 +62,7 @@ def test_lift_operation_in_high_hazard_zone_is_blocked():
 
     assert verdict["decision"] == "NO_GO"
     assert "Safety Violation" in verdict["reason"]
+    assert verdict["reason_code"] == "R-ZONE-01"
 
 
 def test_unauthenticated_issuer_is_rejected():
@@ -71,6 +73,7 @@ def test_unauthenticated_issuer_is_rejected():
 
     assert verdict["decision"] == "NO_GO"
     assert "Authority Failure" in verdict["reason"]
+    assert verdict["reason_code"] == "R-AUTH-01"
 
 
 def test_insufficient_authority_level_is_rejected():
@@ -81,6 +84,7 @@ def test_insufficient_authority_level_is_rejected():
 
     assert verdict["decision"] == "NO_GO"
     assert "Authority Failure" in verdict["reason"]
+    assert verdict["reason_code"] == "R-AUTH-01"
 
 
 def test_unknown_zone_is_blocked():
@@ -91,6 +95,7 @@ def test_unknown_zone_is_blocked():
 
     assert verdict["decision"] == "NO_GO"
     assert "Safety Violation" in verdict["reason"]
+    assert verdict["reason_code"] == "R-ZONE-01"
 
 
 def test_adjudicate_returns_deterministic_verdict():

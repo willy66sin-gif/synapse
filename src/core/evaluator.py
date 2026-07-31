@@ -24,6 +24,9 @@ from typing import Optional, TypedDict
 
 from src.airlock.schemas import ClaimPayload
 from src.core.rules import (
+    REASON_CODE_AUTHORITY_FAILURE,
+    REASON_CODE_PTW_PRECONDITION,
+    REASON_CODE_ZONE_SAFETY_FAILURE,
     IssuerRecord,
     ZoneRecord,
     check_authority,
@@ -62,7 +65,7 @@ def adjudicate(
             decision="NO_GO",
             reason=ptw_outcome.reason,
             rule_trace=rule_trace,
-            reason_code="FAIL_CLOSED_EPTW_PRECONDITION",
+            reason_code=REASON_CODE_PTW_PRECONDITION,
         )
 
     authority_outcome = check_authority(claim, issuer_record)
@@ -73,7 +76,7 @@ def adjudicate(
             decision="NO_GO",
             reason=authority_outcome.reason,
             rule_trace=rule_trace,
-            reason_code=None,
+            reason_code=REASON_CODE_AUTHORITY_FAILURE,
         )
 
     zone_outcome = check_zone_safety(claim, zone_record)
@@ -84,7 +87,7 @@ def adjudicate(
             decision="NO_GO",
             reason=zone_outcome.reason,
             rule_trace=rule_trace,
-            reason_code=None,
+            reason_code=REASON_CODE_ZONE_SAFETY_FAILURE,
         )
 
     return Verdict(

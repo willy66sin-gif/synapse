@@ -7,9 +7,13 @@ record. Format per CLAUDE.md: JSON-LD payload, SHA-256 signature.
 Ported from synapse_mdm.py's `emit_evidence` method: same @context /
 type / claim_id / evaluated_at / input_payload / sha256_signature
 envelope, adapted to carry our Verdict shape (decision + reason +
-rule_trace) instead of a bare (Verdict, reason) tuple. Storage backend
-(Postgres write, file, etc.) is not wired up here — this function only
-produces the signed record; persisting it is a caller concern.
+reason_code + rule_trace) instead of a bare (Verdict, reason) tuple.
+reason_code (R-DOMAIN-NN, e.g. "R-PTW-01" — see src/core/rules.py) is
+None for GO verdicts and for any future failure class that hasn't been
+given a code yet; it is not a substitute for `reason`, which stays the
+full human-readable message. Storage backend (Postgres write, file,
+etc.) is not wired up here — this function only produces the signed
+record; persisting it is a caller concern.
 
 emit_override_evidence() signs a distinct record type for admin
 overrides (src/supervisor/), using the same mechanism. It is purely
@@ -35,6 +39,7 @@ def emit_evidence(claim_payload: dict, verdict: Verdict) -> dict:
         "claim_id": verdict["claim_id"],
         "decision": verdict["decision"],
         "reason": verdict["reason"],
+        "reason_code": verdict["reason_code"],
         "rule_trace": verdict["rule_trace"],
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "input_payload": claim_payload,
