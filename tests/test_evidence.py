@@ -141,3 +141,32 @@ def test_emit_evidence_reason_code_is_included_in_the_signed_payload():
     recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
 
     assert recomputed != tampered["sha256_signature"]
+
+
+def test_emit_evidence_defaults_authority_binding_id_to_none():
+    result = emit_evidence(CLAIM_PAYLOAD, VERDICT)
+
+    assert result["authority_binding_id"] is None
+
+
+def test_emit_evidence_persists_provided_authority_binding_id():
+    """Escalation Ownership Principle: the resolved authority_binding_id
+    must be part of the signed evidence record, not deferred to a later
+    phase."""
+    result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT, authority_binding_id="BIND-999")
+
+    assert result["authority_binding_id"] == "BIND-999"
+
+
+def test_emit_evidence_authority_binding_id_is_included_in_the_signed_payload():
+    """The signature must cover authority_binding_id too — tampering
+    with it must invalidate the signature, same guarantee as reason_code."""
+    result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT, authority_binding_id="BIND-999")
+
+    tampered = dict(result)
+    tampered["authority_binding_id"] = "BIND-101"
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]

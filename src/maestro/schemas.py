@@ -21,6 +21,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from src.maestro.directory import SUPERVISOR_OVERRIDE_URL, resolve_authority
+
 
 class RuleConditionResult(BaseModel):
     """One evaluated sub-condition. Mirrors src/core/rules.py's RuleOutcome."""
@@ -46,6 +48,8 @@ class OutboundAlert(BaseModel):
     rule_trace: list[RuleConditionResult]
     conflicting_condition: Optional[RuleConditionResult] = None
     reason_code: Optional[str] = None
+    authority_binding_id: Optional[str] = None
+    assigned_role: Optional[str] = None
     evaluated_at: str
     recipient_id: str
     escalation_contact: str
@@ -59,28 +63,47 @@ class OutboundAlert(BaseModel):
         return self
 
     @classmethod
-    def from_evidence_record(cls, evidence: dict, recipient_id: str, escalation_contact: str) -> "OutboundAlert":
+    def from_evidence_record(cls, evidence: dict, zone_id: Optional[str]) -> "OutboundAlert":
         """
         Builds an OutboundAlert from a src/evidence/emitter.py record.
         Takes a plain dict (the emitted evidence shape) rather than
         importing src.evidence directly, so Maestro depends on
         Evidence's output shape without Evidence ever knowing Maestro
-        exists. escalation_contact is operational contact info, not
-        part of adjudication, so it can't be derived from the evidence
-        record — it must be supplied by the caller.
+        exists.
 
         reason_code is carried straight through from the evidence
         record (present on every record since emit_evidence() started
         persisting it — R-<DOMAIN>-<NUMBER>, or None on GO; see
-        CLAUDE.md's Reason Code Convention). This only makes the field
-        available on OutboundAlert — no adapter or formatting logic
-        branches on it yet; that's a deliberately separate, still-open
-        decision (see CLAUDE.md's Open Items).
+        CLAUDE.md's Reason Code Convention).
+
+        Escalation Ownership (2026-07-31, Escalation Ownership
+        Principle): who owns escalation is a resolved fact, not
+        caller-supplied operational detail, so this now calls
+        src/maestro/directory.py's resolve_authority(zone_id,
+        reason_code) itself — keyed on the adjudicated failure reason,
+        not on claim_type/work_type — and populates recipient_id,
+        authority_binding_id, assigned_role, and escalation_contact
+        (built from directory.SUPERVISOR_OVERRIDE_URL, a fixed system
+        constant, not a per-binding field) directly from the resolved
+        AuthorityBinding. This applies uniformly to GO and NO_GO alike
+        (GO resolves reason_code=None, landing on the ("*", "*")
+        catch-all) — the Escalation Requirement already applies to
+        every alert regardless of decision. recipient_id falls back to
+        the binding's role name when no real contact_id is on file yet
+        (true for the catch-all today), rather than fabricating one.
+        zone_id is not on the evidence record itself — Evidence stays
+        decoupled from Airlock's ClaimPayload shape — so it's passed
+        explicitly by the caller instead of reached for inside
+        evidence["input_payload"].
         """
         rule_trace = [RuleConditionResult(**rule) for rule in evidence["rule_trace"]]
         conflicting = None
         if evidence["decision"] == "NO_GO":
             conflicting = next((rule for rule in rule_trace if not rule.passed), None)
+
+        binding = resolve_authority(zone_id, evidence["reason_code"])
+        recipient_id = binding.contact_id or binding.role
+        escalation_contact = f"{SUPERVISOR_OVERRIDE_URL}?claim_id={evidence['claim_id']}&binding={binding.binding_id}"
 
         return cls(
             claim_id=evidence["claim_id"],
@@ -88,6 +111,8 @@ class OutboundAlert(BaseModel):
             rule_trace=rule_trace,
             conflicting_condition=conflicting,
             reason_code=evidence["reason_code"],
+            authority_binding_id=binding.binding_id,
+            assigned_role=binding.role,
             evaluated_at=evidence["evaluated_at"],
             recipient_id=recipient_id,
             escalation_contact=escalation_contact,

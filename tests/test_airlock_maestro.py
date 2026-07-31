@@ -21,6 +21,7 @@ from src.airlock.schemas import WorkType
 from src.core.models import AuthorizedIssuer
 from src.core.repository import get_db_session, get_redis_client
 from src.main import app
+from src.maestro.directory import SUPERVISOR_OVERRIDE_URL
 from src.maestro.schemas import DeliveryResult
 
 SUPERINTENDENT_ROW = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDENT", clearance_level=3)
@@ -120,6 +121,7 @@ def test_go_adjudication_triggers_no_maestro_call(maestro_calls):
 
     assert response.status_code == 200
     assert response.json()["decision"] == "GO"
+    assert response.json()["authority_binding_id"] is None
     assert maestro_calls == []
 
 
@@ -137,6 +139,8 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-PTW-01"
+    # Only the ("*", "*") catch-all is seeded today -- see DIRECTORY_MAP.
+    assert response.json()["authority_binding_id"] == "BIND-999"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
@@ -144,6 +148,8 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
         assert alert.reason_code == "R-PTW-01"
         assert alert.conflicting_condition is not None
         assert alert.conflicting_condition.rule_id == "ptw_precondition_check"
+        assert alert.authority_binding_id == "BIND-999"
+        assert alert.assigned_role == "General Duty Officer"
 
 
 def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -154,11 +160,14 @@ def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-AUTH-01"
+    assert response.json()["authority_binding_id"] == "BIND-999"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-AUTH-01"
         assert alert.conflicting_condition.rule_id == "authority_check"
+        assert alert.authority_binding_id == "BIND-999"
+        assert alert.assigned_role == "General Duty Officer"
 
 
 def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -169,19 +178,27 @@ def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-ZONE-01"
+    assert response.json()["authority_binding_id"] == "BIND-999"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-ZONE-01"
         assert alert.conflicting_condition.rule_id == "zone_safety_check"
+        assert alert.authority_binding_id == "BIND-999"
+        assert alert.assigned_role == "General Duty Officer"
 
 
 def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
+    """recipient_id/escalation_contact are now resolved via
+    src/maestro/directory.py, not sourced from the claim's issuer_id --
+    escalation ownership is determined by (zone_id, reason_code), not
+    by who submitted the claim."""
     client = _client_with_stubs(issuer_row=None, zone_data=VALID_LOW_HAZARD_ZONE)
 
     client.post("/airlock/claims", json=_claim(claim_id="CLM-AUTH-202", issuer_id="USR-UNKNOWN"))
 
     assert len(maestro_calls) == 2
     for _, alert in maestro_calls:
-        assert alert.recipient_id == "USR-UNKNOWN"
-        assert alert.escalation_contact == "Your site supervisor"
+        assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet -> role fallback
+        assert alert.escalation_contact.startswith(SUPERVISOR_OVERRIDE_URL)
+        assert "BIND-999" in alert.escalation_contact

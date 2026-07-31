@@ -15,6 +15,7 @@ from src.airlock.schemas import ClaimPayload, WorkType
 from src.core.evaluator import adjudicate
 from src.core.rules import IssuerRecord, ZoneRecord
 from src.evidence.emitter import emit_evidence
+from src.maestro.directory import SUPERVISOR_OVERRIDE_URL
 from src.maestro.schemas import OutboundAlert, RuleConditionResult
 
 SUPERINTENDENT = IssuerRecord(role="SUPERINTENDENT", clearance_level=3)
@@ -125,15 +126,19 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     )
     evidence = emit_evidence(claim_payload, verdict)
 
-    alert = OutboundAlert.from_evidence_record(
-        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
-    )
+    alert = OutboundAlert.from_evidence_record(evidence, zone_id="ZONE-01")
 
     assert alert.decision == "GO"
     assert alert.conflicting_condition is None
     assert alert.claim_id == "CLM-101"
-    assert alert.escalation_contact == ESCALATION_CONTACT
     assert alert.reason_code is None
+    # Only the ("*", "*") catch-all is seeded today, so GO resolves to it too
+    # (the Escalation Requirement applies regardless of decision).
+    assert alert.authority_binding_id == "BIND-999"
+    assert alert.assigned_role == "General Duty Officer"
+    assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet
+    assert alert.escalation_contact.startswith(SUPERVISOR_OVERRIDE_URL)
+    assert "BIND-999" in alert.escalation_contact
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():
@@ -145,15 +150,14 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
     )
     evidence = emit_evidence(claim_payload, verdict)
 
-    alert = OutboundAlert.from_evidence_record(
-        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
-    )
+    alert = OutboundAlert.from_evidence_record(evidence, zone_id="ZONE-99")
 
     assert alert.decision == "NO_GO"
     assert alert.conflicting_condition is not None
     assert "Safety Violation" in alert.conflicting_condition.reason
-    assert alert.escalation_contact == ESCALATION_CONTACT
     assert alert.reason_code == "R-ZONE-01"
+    assert alert.authority_binding_id == "BIND-999"
+    assert alert.assigned_role == "General Duty Officer"
 
 
 def test_from_evidence_record_carries_eptw_reason_code_through():
@@ -174,13 +178,12 @@ def test_from_evidence_record_carries_eptw_reason_code_through():
     verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE)
     evidence = emit_evidence(claim_payload, verdict)
 
-    alert = OutboundAlert.from_evidence_record(
-        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
-    )
+    alert = OutboundAlert.from_evidence_record(evidence, zone_id="ZONE-01")
 
     assert alert.decision == "NO_GO"
     assert alert.reason_code == "R-PTW-01"
     assert evidence["reason_code"] == "R-PTW-01"
+    assert alert.authority_binding_id == "BIND-999"
 
 
 def test_outbound_alert_accepts_reason_code_directly():

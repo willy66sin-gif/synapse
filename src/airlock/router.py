@@ -17,6 +17,14 @@ both WhatsAppAdapter and TelegramAdapter unconditionally. Unlike the
 override endpoint, notification results aren't added to this
 endpoint's response body — Maestro delivery stays a side effect here,
 so the response shape for /airlock/claims is unchanged either way.
+
+Escalation Ownership (2026-07-31): on NO_GO, authority is resolved via
+src/maestro/directory.py's resolve_authority(zone_id, reason_code)
+*before* emit_evidence() runs, so the resolved authority_binding_id
+can be part of the signed evidence record itself, not appended after
+signing. OutboundAlert.from_evidence_record() resolves authority again
+internally for the alert's fields — a second call to the same pure,
+deterministic lookup, not a second decision; see its docstring.
 """
 from fastapi import APIRouter, Depends
 from redis.asyncio import Redis
@@ -34,6 +42,7 @@ from src.evidence.emitter import emit_evidence
 from src.evidence.repository import persist_adjudication_record
 from src.maestro.adapters.telegram import TelegramAdapter
 from src.maestro.adapters.whatsapp import WhatsAppAdapter
+from src.maestro.directory import resolve_authority
 from src.maestro.schemas import OutboundAlert
 
 router = APIRouter(prefix="/airlock", tags=["airlock"])
@@ -50,23 +59,26 @@ async def submit_claim(
     a malformed body is rejected before this function body runs.
 
     Wires the full pipeline: fetch issuer/zone state -> adjudicate
-    (pure) -> emit signed evidence record -> persist it, so a
-    subsequent admin-override request has something real to check
-    "does this claim exist" against -> on NO_GO only, notify Maestro.
+    (pure) -> resolve escalation authority (NO_GO only) -> emit signed
+    evidence record (carrying that resolved authority_binding_id) ->
+    persist it, so a subsequent admin-override request has something
+    real to check "does this claim exist" against -> on NO_GO only,
+    notify Maestro.
     """
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
     zone_record = await fetch_zone_record(redis_client, claim.zone_id)
 
     verdict = adjudicate(claim, issuer_record, zone_record)
-    evidence = emit_evidence(claim.model_dump(mode="json"), verdict)
+
+    authority_binding_id = None
+    if verdict["decision"] == "NO_GO":
+        authority_binding_id = resolve_authority(claim.zone_id, verdict["reason_code"]).binding_id
+
+    evidence = emit_evidence(claim.model_dump(mode="json"), verdict, authority_binding_id=authority_binding_id)
     await persist_adjudication_record(session, evidence)
 
     if verdict["decision"] == "NO_GO":
-        alert = OutboundAlert.from_evidence_record(
-            evidence,
-            recipient_id=claim.issuer_id,
-            escalation_contact="Your site supervisor",
-        )
+        alert = OutboundAlert.from_evidence_record(evidence, zone_id=claim.zone_id)
         for adapter in (WhatsAppAdapter(), TelegramAdapter()):
             adapter.send_alert(alert)
 
