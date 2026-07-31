@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Blocked Screen — demo</title>
+</head>
+<body>
+  <h1>Blocked Screen demo</h1>
+  <p>Loads fixture data shaped exactly like real backend responses (see README.md). Point <code>overrideEndpoint</code> at a running <code>POST /supervisor/override</code> to test the real override flow end-to-end.</p>
+
+  <h2>NO_GO — ePTW precondition failure</h2>
+  <blocked-screen id="ptw-blocked"></blocked-screen>
+
+  <h2>NO_GO — authority failure, no escalation contact supplied</h2>
+  <blocked-screen id="auth-blocked"></blocked-screen>
+
+  <h2>GO</h2>
+  <blocked-screen id="cleared"></blocked-screen>
+
+  <script type="module" src="./blocked-screen.js"></script>
+  <script type="module">
+    // Fixture shaped exactly like src/evidence/emitter.py::emit_evidence()'s
+    // real output for a PTW-rejected claim (see tests/test_core_eptw.py).
+    document.getElementById("ptw-blocked").data = {
+      evidence: {
+        claim_id: "CLM-EPTW-001",
+        decision: "NO_GO",
+        reason: "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'EXCAVATION'.",
+        reason_code: "R-PTW-01",
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: false, reason: "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'EXCAVATION'." },
+        ],
+        evaluated_at: "2026-07-31T10:00:00+00:00",
+      },
+      escalationContact: "Site Superintendent: +1-555-0100",
+      telemetrySigned: true,
+      overrideEndpoint: "/supervisor/override",
+      issuerId: "",
+    };
+
+    document.getElementById("auth-blocked").data = {
+      evidence: {
+        claim_id: "CLM-102",
+        decision: "NO_GO",
+        reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated.",
+        reason_code: "R-AUTH-01",
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
+          { rule_id: "authority_check", passed: false, reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated." },
+        ],
+        evaluated_at: "2026-07-31T10:05:00+00:00",
+      },
+      escalationContact: "",
+      telemetrySigned: false,
+    };
+
+    document.getElementById("cleared").data = {
+      evidence: {
+        claim_id: "CLM-101",
+        decision: "GO",
+        reason: "Claim 'CLM-101' cleared for execution in ZONE-01.",
+        reason_code: null,
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
+          { rule_id: "authority_check", passed: true, reason: "Authority Validated" },
+          { rule_id: "zone_safety_check", passed: true, reason: "Zone Safety Validated" },
+        ],
+        evaluated_at: "2026-07-31T10:10:00+00:00",
+      },
+      escalationContact: "Site Superintendent: +1-555-0100",
+      // telemetrySigned intentionally omitted — renders "unknown" state.
+    };
+  </script>
+</body>
+</html>
