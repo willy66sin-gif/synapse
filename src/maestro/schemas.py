@@ -45,6 +45,7 @@ class OutboundAlert(BaseModel):
     decision: Literal["GO", "NO_GO"]
     rule_trace: list[RuleConditionResult]
     conflicting_condition: Optional[RuleConditionResult] = None
+    reason_code: Optional[str] = None
     evaluated_at: str
     recipient_id: str
     escalation_contact: str
@@ -67,6 +68,14 @@ class OutboundAlert(BaseModel):
         exists. escalation_contact is operational contact info, not
         part of adjudication, so it can't be derived from the evidence
         record — it must be supplied by the caller.
+
+        reason_code is carried straight through from the evidence
+        record (present on every record since emit_evidence() started
+        persisting it — R-<DOMAIN>-<NUMBER>, or None on GO; see
+        CLAUDE.md's Reason Code Convention). This only makes the field
+        available on OutboundAlert — no adapter or formatting logic
+        branches on it yet; that's a deliberately separate, still-open
+        decision (see CLAUDE.md's Open Items).
         """
         rule_trace = [RuleConditionResult(**rule) for rule in evidence["rule_trace"]]
         conflicting = None
@@ -78,6 +87,7 @@ class OutboundAlert(BaseModel):
             decision=evidence["decision"],
             rule_trace=rule_trace,
             conflicting_condition=conflicting,
+            reason_code=evidence["reason_code"],
             evaluated_at=evidence["evaluated_at"],
             recipient_id=recipient_id,
             escalation_contact=escalation_contact,

@@ -11,6 +11,7 @@ standalone verdict), and every alert must carry an escalation_contact
 import pytest
 from pydantic import ValidationError
 
+from src.airlock.schemas import ClaimPayload, WorkType
 from src.core.evaluator import adjudicate
 from src.core.rules import IssuerRecord, ZoneRecord
 from src.evidence.emitter import emit_evidence
@@ -132,6 +133,7 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     assert alert.conflicting_condition is None
     assert alert.claim_id == "CLM-101"
     assert alert.escalation_contact == ESCALATION_CONTACT
+    assert alert.reason_code is None
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():
@@ -151,6 +153,50 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
     assert alert.conflicting_condition is not None
     assert "Safety Violation" in alert.conflicting_condition.reason
     assert alert.escalation_contact == ESCALATION_CONTACT
+    assert alert.reason_code == "R-ZONE-01"
+
+
+def test_from_evidence_record_carries_eptw_reason_code_through():
+    """reason_code must flow Verdict -> emit_evidence() -> OutboundAlert unchanged,
+    not just for the zone-safety case above but for the ePTW gate too."""
+    claim_payload = {"claim_id": "CLM-EPTW-900", "issuer_id": "USR-SUP-01"}
+    claim = ClaimPayload(
+        claim_id=claim_payload["claim_id"],
+        timestamp="2026-07-31T10:00:00Z",
+        issuer_id=claim_payload["issuer_id"],
+        authority_level=3,
+        zone_id="ZONE-01",
+        action_type="EXCAVATION_WORK",
+        payload_data={},
+        work_type=WorkType.EXCAVATION,
+        ptw_context=None,
+    )
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE)
+    evidence = emit_evidence(claim_payload, verdict)
+
+    alert = OutboundAlert.from_evidence_record(
+        evidence, recipient_id="+15551234567", escalation_contact=ESCALATION_CONTACT
+    )
+
+    assert alert.decision == "NO_GO"
+    assert alert.reason_code == "R-PTW-01"
+    assert evidence["reason_code"] == "R-PTW-01"
+
+
+def test_outbound_alert_accepts_reason_code_directly():
+    """Sanity check on the field itself, independent of from_evidence_record."""
+    alert = OutboundAlert(
+        claim_id="CLM-101",
+        decision="NO_GO",
+        rule_trace=[FAILING_RULE],
+        conflicting_condition=FAILING_RULE,
+        reason_code="R-AUTH-01",
+        evaluated_at="2026-07-27T10:05:00+00:00",
+        recipient_id="+15551234567",
+        escalation_contact=ESCALATION_CONTACT,
+    )
+
+    assert alert.reason_code == "R-AUTH-01"
 
 
 def _claim(claim_id: str, issuer_id: str, zone_id: str = "ZONE-01"):
