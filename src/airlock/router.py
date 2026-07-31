@@ -65,7 +65,7 @@ async def submit_claim(
         alert = OutboundAlert.from_evidence_record(
             evidence,
             recipient_id=claim.issuer_id,
-            escalation_contact=f"Submit an override via POST /supervisor/override (issuer_id={claim.issuer_id}).",
+            escalation_contact="Your site supervisor",
         )
         for adapter in (WhatsAppAdapter(), TelegramAdapter()):
             adapter.send_alert(alert)

@@ -184,4 +184,4 @@ def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
     assert len(maestro_calls) == 2
     for _, alert in maestro_calls:
         assert alert.recipient_id == "USR-UNKNOWN"
-        assert "/supervisor/override" in alert.escalation_contact
+        assert alert.escalation_contact == "Your site supervisor"
