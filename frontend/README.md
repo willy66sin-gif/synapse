@@ -26,3 +26,7 @@ As of 2026-07-31, the component is reachable in the running app, not just as a s
 ### Try it
 
 Open `demo.html` directly in a browser (no server, no build step) for static fixture data. To exercise the real override flow, serve it alongside a running API (`docker compose up` / `uvicorn src.main:app`) so `fetch("/supervisor/override")` in `demo.html`'s first fixture resolves. For real persisted data, adjudicate a NO_GO claim via `POST /airlock/claims` and then visit `GET /supervisor/blocked/{claim_id}` on the running API.
+
+### Frontline Worker UI — approved design, not yet built (2026-08-01)
+
+`blocked-screen.js` is a **supervisor-facing** component. CLAUDE.md's Locked Design Principles now also record a separate, approved-but-unimplemented **Stage 2 Frontline Worker Contract** (mobile-first, plain-language "You may proceed"/"Do not proceed" verdicts, 48px touch targets, WCAG AA baseline, progressive-disclosure rule trace, etc.) and a **GO Freshness Principle** (approved in principle; interval/schema/enforcement details explicitly unresolved). Neither is built anywhere in this repo yet — do not treat this component as satisfying that contract. If/when a frontline-facing surface is built, any fixture representing a target-state assurance failure (telemetry unavailable, cryptographic assurance unknown — see CLAUDE.md's Open Items) must be visibly labelled "TARGET STATE / NOT IMPLEMENTED"; `demo.html` has no such fixtures today.
