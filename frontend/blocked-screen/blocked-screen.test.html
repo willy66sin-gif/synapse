@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Blocked Screen — tests (independent NO_GO remediation, 2026-08-01)</title>
+</head>
+<body>
+  <h1>blocked-screen.js tests</h1>
+  <p>
+    Dependency-free assertion harness — no test runner, no build step, per the
+    standing "no new frontend framework or build tooling" decision (see
+    CLAUDE.md's Open Items). Open this file directly in a browser; results
+    render below and also print to the console. <code>#results-json</code>
+    holds a machine-readable summary for automated checks.
+  </p>
+  <div id="summary"></div>
+  <ul id="results"></ul>
+  <pre id="results-json"></pre>
+
+  <script type="module" src="./blocked-screen.js"></script>
+  <script type="module">
+    const results = [];
+
+    function assert(name, condition, detail) {
+      results.push({ name, pass: !!condition, detail: detail || "" });
+      const line = `[${condition ? "PASS" : "FAIL"}] ${name}${detail ? " — " + detail : ""}`;
+      // eslint-disable-next-line no-console
+      console[condition ? "log" : "error"](line);
+    }
+
+    function makeElement() {
+      const el = document.createElement("blocked-screen");
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function screenSection(el) {
+      return el.shadowRoot.querySelector("section.screen");
+    }
+
+    // --- Fixtures --------------------------------------------------------
+    // Shaped exactly like real src/evidence/emitter.py::emit_evidence()
+    // output, same convention as demo.html's fixtures.
+
+    const NO_GO_PTW = {
+      evidence: {
+        claim_id: "CLM-TEST-PTW",
+        decision: "NO_GO",
+        reason: "FAIL_CLOSED_EPTW_PRECONDITION: permit expired.",
+        reason_code: "R-PTW-01",
+        authority_binding_id: "BIND-999",
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: false, reason: "FAIL_CLOSED_EPTW_PRECONDITION: permit expired." },
+        ],
+        evaluated_at: "2026-08-01T10:00:00+00:00",
+      },
+      escalationContact: "Your site supervisor",
+      assignedRole: "General Duty Officer",
+      issuerId: "",
+    };
+
+    const NO_GO_AUTH = {
+      evidence: {
+        claim_id: "CLM-TEST-AUTH",
+        decision: "NO_GO",
+        reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated.",
+        reason_code: "R-AUTH-01",
+        authority_binding_id: "BIND-999",
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
+          { rule_id: "authority_check", passed: false, reason: "Authority Failure: Issuer 'USR-UNKNOWN' is unauthenticated." },
+        ],
+        evaluated_at: "2026-08-01T10:05:00+00:00",
+      },
+      escalationContact: "Your site supervisor",
+      assignedRole: "General Duty Officer",
+      issuerId: "",
+    };
+
+    const GO = {
+      evidence: {
+        claim_id: "CLM-TEST-GO",
+        decision: "GO",
+        reason: "Claim 'CLM-TEST-GO' cleared for execution in ZONE-01.",
+        reason_code: null,
+        authority_binding_id: null,
+        rule_trace: [
+          { rule_id: "ptw_precondition_check", passed: true, reason: "No permit required for work_type 'NOMINAL_CIVIL'." },
+          { rule_id: "authority_check", passed: true, reason: "Authority Validated" },
+          { rule_id: "zone_safety_check", passed: true, reason: "Zone Safety Validated" },
+        ],
+        evaluated_at: "2026-08-01T10:10:00+00:00",
+      },
+      escalationContact: "Your site supervisor",
+      issuerId: "",
+    };
+
+    // --- 1. Primary instruction ("Do not proceed") -----------------------
+
+    (function testNoGoFirstRenderShowsPrimaryInstruction() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      const instruction = el.shadowRoot.querySelector(".primary-instruction");
+      assert(
+        "NO_GO first render shows 'Do not proceed.' primary instruction",
+        instruction && instruction.textContent.trim() === "Do not proceed.",
+        instruction ? instruction.textContent : "no .primary-instruction element found"
+      );
+    })();
+
+    (function testGoFirstRenderHasNoPrimaryInstruction() {
+      const el = makeElement();
+      el.data = GO;
+      const instruction = el.shadowRoot.querySelector(".primary-instruction");
+      assert(
+        "GO render has no primary-instruction element (NO_GO-only scope)",
+        instruction === null
+      );
+    })();
+
+    // --- 2. role="alert" only for a genuinely critical dynamic transition -
+
+    (function testFirstRenderNeverUsesAlertRole() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      const section = screenSection(el);
+      assert(
+        "NO_GO first render uses role=status, not role=alert",
+        section.getAttribute("role") === "status" && section.getAttribute("aria-live") === "polite"
+      );
+    })();
+
+    (function testDynamicGoToNoGoTransitionUsesAlert() {
+      const el = makeElement();
+      el.data = GO;
+      el.data = NO_GO_PTW;
+      const section = screenSection(el);
+      assert(
+        "GO -> NO_GO dynamic transition uses role=alert / aria-live=assertive",
+        section.getAttribute("role") === "alert" && section.getAttribute("aria-live") === "assertive"
+      );
+    })();
+
+    (function testDynamicNoGoReasonChangeUsesAlert() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      el.data = NO_GO_AUTH;
+      const section = screenSection(el);
+      assert(
+        "NO_GO(reason A) -> NO_GO(reason B) dynamic transition uses role=alert",
+        section.getAttribute("role") === "alert"
+      );
+    })();
+
+    (function testDynamicNoGoToGoTransitionDoesNotUseAlert() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      el.data = GO;
+      const section = screenSection(el);
+      assert(
+        "NO_GO -> GO dynamic transition does NOT use role=alert (scope is NO_GO-only)",
+        section.getAttribute("role") === "status"
+      );
+    })();
+
+    (function testSameStateReassignmentDoesNotUseAlert() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      el.data = { ...NO_GO_PTW }; // same decision + reason_code, no real change
+      const section = screenSection(el);
+      assert(
+        "Reassigning the same decision/reason_code does not trigger alert semantics",
+        section.getAttribute("role") === "status"
+      );
+    })();
+
+    (function testOverrideFormOnlyRerenderDoesNotFlipRole() {
+      const el = makeElement();
+      el.data = GO;
+      el.data = NO_GO_PTW; // real transition -> role becomes "alert"
+      const beforeRole = screenSection(el).getAttribute("role");
+      el._render(); // simulates the re-render _handleOverrideSubmit triggers without reassigning `data`
+      const afterRole = screenSection(el).getAttribute("role");
+      assert(
+        "A render triggered by override-form state alone (not a data reassignment) does not change role",
+        beforeRole === "alert" && afterRole === "alert",
+        `before=${beforeRole} after=${afterRole}`
+      );
+    })();
+
+    // --- 3. BIND-999 stays non-interactive --------------------------------
+
+    (function testBind999IsNonInteractive() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      const escalationDiv = el.shadowRoot.querySelector(".escalation");
+      const interactiveInsideEscalation = escalationDiv.querySelectorAll("a, button");
+      assert(
+        "BIND-999 renders as text with no <a>/<button> inside the escalation block",
+        escalationDiv.textContent.includes("BIND-999") && interactiveInsideEscalation.length === 0,
+        `escalation text: "${escalationDiv.textContent.trim()}", interactive elements found: ${interactiveInsideEscalation.length}`
+      );
+    })();
+
+    // --- 4. Rule trace + escalation remain fully visible ------------------
+
+    (function testRuleTraceAndEscalationVisibleForNoGo() {
+      const el = makeElement();
+      el.data = NO_GO_AUTH;
+      const items = el.shadowRoot.querySelectorAll("ul.rule-trace li");
+      const escalation = el.shadowRoot.querySelector(".escalation");
+      assert(
+        "NO_GO: full rule_trace (2 entries) and escalation block both render",
+        items.length === 2 && escalation !== null,
+        `rule_trace items rendered: ${items.length}`
+      );
+    })();
+
+    (function testRuleTraceAndEscalationVisibleForGo() {
+      const el = makeElement();
+      el.data = GO;
+      const items = el.shadowRoot.querySelectorAll("ul.rule-trace li");
+      const escalation = el.shadowRoot.querySelector(".escalation");
+      assert(
+        "GO: full rule_trace (3 entries) and escalation block both render",
+        items.length === 3 && escalation !== null,
+        `rule_trace items rendered: ${items.length}`
+      );
+    })();
+
+    // --- 5. Regression: reason_code never a passing rule id ---------------
+
+    (function testReasonCodeNeverInsideRuleTraceList() {
+      const el = makeElement();
+      el.data = NO_GO_PTW;
+      const reasonCodeInTrace = el.shadowRoot.querySelector("ul.rule-trace .reason-code");
+      const reasonCodeInConflict = el.shadowRoot.querySelector(".conflict .reason-code");
+      const passingItemsWithReasonCode = Array.from(el.shadowRoot.querySelectorAll("ul.rule-trace li.pass")).filter(
+        (li) => li.textContent.includes("R-PTW-01")
+      );
+      assert(
+        "reason_code renders only inside .conflict, never inside the rule_trace list or a passing item",
+        reasonCodeInTrace === null && reasonCodeInConflict !== null && passingItemsWithReasonCode.length === 0
+      );
+    })();
+
+    // --- Summary -----------------------------------------------------------
+
+    const failed = results.filter((r) => !r.pass);
+    document.getElementById("summary").textContent = `${results.length - failed.length}/${results.length} passed`;
+    document.getElementById("results").innerHTML = results
+      .map((r) => `<li style="color:${r.pass ? "green" : "red"}">[${r.pass ? "PASS" : "FAIL"}] ${r.name}${r.detail ? " — " + r.detail : ""}</li>`)
+      .join("");
+    document.getElementById("results-json").textContent = JSON.stringify(
+      { total: results.length, passed: results.length - failed.length, failed: failed.map((r) => r.name) },
+      null,
+      2
+    );
+    // eslint-disable-next-line no-console
+    console.log(`${results.length - failed.length}/${results.length} passed`);
+  </script>
+</body>
+</html>

@@ -11,6 +11,24 @@
  *   regardless of decision — this component never lets a caller omit it,
  *   independent of whatever the backend does or doesn't enforce.
  *
+ * Independent NO_GO remediation (2026-08-01, scoped narrowly — see
+ * CLAUDE.md's Stage 2 Frontline Worker Contract for the full target-state
+ * contract this does NOT implement):
+ * - NO_GO renders an unmistakable primary instruction, "Do not proceed."
+ *   GO intentionally gets no equivalent "You may proceed" copy here —
+ *   out of scope for this pass, which is NO_GO-only.
+ * - role="alert" is reserved for a genuinely critical, dynamic change: an
+ *   already-rendered verdict changing (decision or reason_code) to land
+ *   on NO_GO. It is never applied on first render (nothing has "changed"
+ *   yet at first paint) and never for a GO/cleared result — computed once
+ *   per real `data` assignment in the setter below, not blanket-applied.
+ *   Override-form-only re-renders (pending/success/error) reuse whatever
+ *   role the last real verdict assignment set; they never flip it.
+ *
+ * Explicitly NOT touched in this pass: GO freshness/expiry/revalidation,
+ * telemetry assurance beyond the existing signed/unsigned/unknown
+ * placeholder, any new reason codes, BIND-999 interactivity (still none).
+ *
  * No framework dependency: no repo-wide frontend stack exists yet (no
  * package.json, no frontend/ directory prior to this component) — see
  * frontend/README.md. This is deliberately a zero-dependency Custom
@@ -45,9 +63,27 @@ class BlockedScreen extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = null;
     this._overrideState = { status: "idle", message: "" }; // idle | pending | success | error
+    this._regionRole = "status";
+    this._regionLive = "polite";
   }
 
   set data(value) {
+    const previousEvidence = this._data && this._data.evidence;
+    const nextEvidence = value && value.evidence;
+
+    // See the class doc comment: alert semantics only for a genuinely
+    // critical, dynamic transition into NO_GO on an already-rendered
+    // screen -- not on first render, not for GO.
+    const isRealVerdictChange =
+      previousEvidence != null &&
+      nextEvidence != null &&
+      (previousEvidence.decision !== nextEvidence.decision ||
+        previousEvidence.reason_code !== nextEvidence.reason_code);
+    const isDynamicNoGoTransition = isRealVerdictChange && nextEvidence.decision === "NO_GO";
+
+    this._regionRole = isDynamicNoGoTransition ? "alert" : "status";
+    this._regionLive = isDynamicNoGoTransition ? "assertive" : "polite";
+
     this._data = value;
     this._overrideState = { status: "idle", message: "" };
     this._render();
@@ -76,11 +112,13 @@ class BlockedScreen extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>${STYLE}</style>
-      <section class="screen ${isBlocked ? "blocked" : "cleared"}" role="status" aria-live="polite">
+      <section class="screen ${isBlocked ? "blocked" : "cleared"}" role="${this._regionRole}" aria-live="${this._regionLive}">
         <header>
           <span class="decision-badge">${escapeHtml(evidence.decision)}</span>
           <span class="claim-id">Claim ${escapeHtml(evidence.claim_id)}</span>
         </header>
+
+        ${isBlocked ? `<p class="primary-instruction">Do not proceed.</p>` : ""}
 
         ${isBlocked ? this._renderConflict(conflicting, evidence.reason_code) : ""}
 
@@ -261,6 +299,7 @@ const STYLE = `
   header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
   .decision-badge { font-weight: 700; letter-spacing: 0.05em; padding: 0.2rem 0.6rem; border-radius: 4px; background: rgba(0,0,0,0.08); }
   .claim-id { font-family: monospace; }
+  .primary-instruction { font-weight: 700; font-size: 1.1rem; color: #b3261e; margin: 0 0 0.75rem; }
   .conflict { border: 1px solid #b3261e; background: #fff; border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; }
   .conflict.missing { color: #b3261e; font-weight: 600; }
   .reason-code { font-family: monospace; margin-left: 0.5rem; background: #eee; padding: 0.1rem 0.4rem; border-radius: 3px; }
