@@ -118,6 +118,11 @@ def test_frontline_screen_renders_for_no_go_claim():
     assert "/supervisor/override" not in body
     assert "Contact Supervisor" not in body
 
+    # WCAG 1.4.4/1.4.10: reflow/zoom must stay available -- scaling never disabled.
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1" />' in body
+    assert "user-scalable=no" not in body
+    assert "maximum-scale=1" not in body
+
 
 def test_frontline_screen_renders_for_go_claim():
     """Unlike the Supervisor Blocked Screen, GO is a valid, renderable

@@ -100,6 +100,7 @@ def _render_frontline_screen_page(data: dict) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Status — {claim_id}</title>
 </head>
 <body>

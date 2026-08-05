@@ -33,6 +33,28 @@
  *     traceId: string,       // e.g. "BIND-999" — secondary/reference only
  *     assignedRole: string,  // e.g. "General Duty Officer"
  *   }
+ *
+ * Accessibility pass (2026-08-05):
+ * - Contrast: every text/background pair verified >= 4.5:1 (WCAG 1.4.3).
+ *   .trace-id's original #777 measured 3.92:1/4.03:1 against the two screen
+ *   backgrounds -- a real failure, not a style preference -- darkened to
+ *   #666 (5.02:1/5.17:1) while keeping it visually lightest/smallest/last,
+ *   so it still reads as reference-only, never competing with the decision.
+ * - role="status" / aria-live="polite" on every render, deliberately not
+ *   "assertive" for NO_GO. This mirrors blocked-screen.js's own locked
+ *   reasoning and CLAUDE.md's Stage 2 Frontline Worker Contract ("role=alert
+ *   used only where appropriate for dynamic critical state changes -- not
+ *   as a default"): assertive/alert semantics are for an already-rendered
+ *   screen changing state, and this component has no such transition --
+ *   data is set once, server-side, on page load. There is no "first
+ *   render vs. later render" distinction here for alert semantics to
+ *   apply to; every render is the only render.
+ * - Reflow: no fixed-width elements; .screen uses max-width with rem
+ *   padding, verified live at 320px viewport width with no horizontal
+ *   scrollbar (see @media rule below for the tightest breakpoint).
+ * - Viewport: user-scalable is left at the browser default (not disabled)
+ *   in every page that hosts this component -- see demo.html and
+ *   src/frontline/router.py's rendered page.
  */
 class FrontlineScreen extends HTMLElement {
   constructor() {
@@ -105,8 +127,13 @@ const STYLE = `
   .reason { font-size: 1rem; margin: 0 0 1.25rem; color: #333; }
   .next-step { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.5rem 0.75rem; background: rgba(0,0,0,0.05); border-radius: 6px; font-size: 1rem; }
   .next-step .label { font-weight: 600; }
-  .trace-id { margin-top: 0.75rem; font-size: 0.8rem; font-family: monospace; color: #777; }
+  .trace-id { margin-top: 0.75rem; font-size: 0.8rem; font-family: monospace; color: #666; }
   .empty { color: #555; font-style: italic; text-align: center; }
+
+  @media (max-width: 360px) {
+    .screen { padding: 1rem 0.85rem; }
+    .primary-instruction { font-size: 1.5rem; }
+  }
 `;
 
 customElements.define("frontline-screen", FrontlineScreen);
