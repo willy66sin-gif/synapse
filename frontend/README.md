@@ -27,6 +27,22 @@ As of 2026-07-31, the component is reachable in the running app, not just as a s
 
 Open `demo.html` directly in a browser (no server, no build step) for static fixture data. To exercise the real override flow, serve it alongside a running API (`docker compose up` / `uvicorn src.main:app`) so `fetch("/supervisor/override")` in `demo.html`'s first fixture resolves. For real persisted data, adjudicate a NO_GO claim via `POST /airlock/claims` and then visit `GET /supervisor/blocked/{claim_id}` on the running API.
 
-### Frontline Worker UI — approved design, not yet built (2026-08-01)
+### GO Freshness Principle — approved, not implemented
 
-`blocked-screen.js` is a **supervisor-facing** component. CLAUDE.md's Locked Design Principles now also record a separate, approved-but-unimplemented **Stage 2 Frontline Worker Contract** (mobile-first, plain-language "You may proceed"/"Do not proceed" verdicts, 48px touch targets, WCAG AA baseline, progressive-disclosure rule trace, etc.) and a **GO Freshness Principle** (approved in principle; interval/schema/enforcement details explicitly unresolved). Neither is built anywhere in this repo yet — do not treat this component as satisfying that contract. If/when a frontline-facing surface is built, any fixture representing a target-state assurance failure (telemetry unavailable, cryptographic assurance unknown — see CLAUDE.md's Open Items) must be visibly labelled "TARGET STATE / NOT IMPLEMENTED"; `demo.html` has no such fixtures today.
+CLAUDE.md's **GO Freshness Principle** (approved in principle; interval/schema/enforcement details explicitly unresolved) is not built anywhere in this repo. Neither `<blocked-screen>` nor `<frontline-screen>` shows a "Last Verified"/freshness/expiry concept — do not add one to either component without that principle being resolved first (see CLAUDE.md's Open Items). If/when a target-state assurance failure fixture (telemetry unavailable, cryptographic assurance unknown) is added anywhere, it must be visibly labelled "TARGET STATE / NOT IMPLEMENTED"; no fixture in this directory has one today.
+
+## `frontline-screen/`
+
+Frontline Worker-facing verdict display — first implementation of this persona (2026-08-05), previously only an approved, unbuilt design contract (CLAUDE.md's Stage 2 Frontline Worker Contract, 1 Aug). Deliberately separate from `blocked-screen/`, which is supervisor-facing: `<frontline-screen>` has no rule-trace list, no rule IDs, no evidence-signature detail, no override form, and no code path that can reach `/supervisor/override` — enforcing CLAUDE.md's **Escalation vs. Override — Decoupling Principle** (Locked, 5 Aug 2026) by construction.
+
+- **Data** (`src/frontline/router.py`'s `frontline_status_screen`, built from the same real persisted evidence record `blocked-screen` uses): `claimId`, `decision`, `reasonCode`, `reason` (plain-language only — the one failing rule's `reason` string, never its `rule_id`; empty on GO), `workActivity` (`evidence.input_payload.action_type`, e.g. `"MATERIAL_ENTRY"`), `traceId` (`AuthorityBinding.binding_id`, e.g. `"BIND-999"` — secondary/reference only, never primary content), `assignedRole` (`AuthorityBinding.role`, e.g. `"General Duty Officer"`).
+- **Escalation, resolved for real**: unlike `GET /supervisor/blocked/{claim_id}`, this route *does* call `src/maestro/directory.py`'s `resolve_authority(zone_id, reason_code)` itself, so `assignedRole` is always the actually-resolved role — never a hardcoded/invented title like "Supervisor". Today the directory has exactly one entry, so this is always "General Duty Officer" (`BIND-999`).
+- **Copy**: "You may proceed." / "Do not proceed." are CLAUDE.md's own approved Stage 1 Operational Stories wording, not invented here.
+
+### Live: `GET /frontline/blocked/{claim_id}`
+
+Reachable in the running app the same way `blocked-screen` is (`src/main.py` mounts `frontend/` as `/static`). 404 if the claim was never adjudicated. **Unlike** the Supervisor Blocked Screen, this route renders for **GO and NO_GO alike** — it does not 409 on GO — because the Frontline persona's question ("Can I proceed?") is answered validly by either decision, per the spec's Section 3 (Persona Questions).
+
+### Try it
+
+Open `demo.html` directly in a browser (no server, no build step) for static GO/NO_GO fixtures. For real persisted data, adjudicate a claim via `POST /airlock/claims` and then visit `GET /frontline/blocked/{claim_id}` on the running API.

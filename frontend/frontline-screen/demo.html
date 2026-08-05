@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Frontline Screen — Demo Fixtures</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; padding: 2rem; }
+    .fixture { max-width: 480px; margin: 0 auto 2rem; }
+    .fixture h2 { font-size: 0.9rem; color: #666; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="fixture">
+    <h2>GO</h2>
+    <frontline-screen id="go"></frontline-screen>
+  </div>
+
+  <div class="fixture">
+    <h2>NO_GO — ePTW precondition failure</h2>
+    <frontline-screen id="no-go"></frontline-screen>
+  </div>
+
+  <script type="module" src="./frontline-screen.js"></script>
+  <script type="module">
+    document.getElementById("go").data = {
+      claimId: "CLM-101",
+      decision: "GO",
+      reasonCode: null,
+      reason: "",
+      workActivity: "MATERIAL_ENTRY",
+      traceId: "BIND-999",
+      assignedRole: "General Duty Officer",
+    };
+
+    document.getElementById("no-go").data = {
+      claimId: "CLM-EPTW-301",
+      decision: "NO_GO",
+      reasonCode: "R-PTW-01",
+      reason: "No permit-to-work context provided for high-risk work_type 'EXCAVATION'.",
+      workActivity: "EXCAVATION",
+      traceId: "BIND-999",
+      assignedRole: "General Duty Officer",
+    };
+  </script>
+</body>
+</html>
