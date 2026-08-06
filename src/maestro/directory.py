@@ -25,33 +25,17 @@ Frontline Worker screen closed (they all call resolve_authority()),
 which is a different, larger decision than this pass's scope. See
 CLAUDE.md's Open Items for both the role-to-registration binding and
 the reason_code -> role_type routing table, neither decided here.
+
+Relocated (2026-08-06): AuthorityRoleType itself now lives in
+src/core/roles.py, re-exported here for backward compatibility (same
+enum, same six members, no behavior change) -- src/core/models.py's
+new IssuerRole needed it too, and Core must not depend on Maestro to
+get it (see src/core/roles.py's own doc comment for the full reasoning).
 """
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
 
-
-class AuthorityRoleType(str, Enum):
-    """
-    Licensed/registered regulatory authority roles recognized as
-    verdict-changing authorities under the Supervisor Override
-    Retirement principle. Full role definitions and PEB/MOM
-    registration binding are explicitly future work -- not decided or
-    encoded here (see CLAUDE.md's Open Items) -- these are the six
-    codes as specified, nothing more.
-
-    PR (Permit Receiver) is deliberately NOT a member of this set: it
-    names the executing worker/crew, not an approving or certifying
-    role -- the same category as the Frontline Worker persona, not
-    this authority set.
-    """
-
-    PE = "PE"
-    QP = "QP"
-    PI = "PI"
-    PA = "PA"
-    PM = "PM"
-    SA = "SA"
+from src.core.roles import AuthorityRoleType  # noqa: F401 - re-exported for backward compatibility
 
 
 @dataclass(frozen=True)

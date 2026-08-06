@@ -20,7 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import settings
-from src.core.models import AuthorizedIssuer
+from src.core.models import AuthorizedIssuer, IssuerRole
+from src.core.roles import AuthorityRoleType
 from src.core.rules import IssuerRecord, ZoneRecord
 
 _engine = create_async_engine(settings.database_url)
@@ -56,6 +57,24 @@ async def fetch_issuer_record(session: AsyncSession, issuer_id: str) -> Optional
     if row is None:
         return None
     return IssuerRecord(role=row.role, clearance_level=row.clearance_level)
+
+
+async def fetch_issuer_roles(session: AsyncSession, issuer_id: str) -> list[AuthorityRoleType]:
+    """
+    Read-only access to src/core/models.py's IssuerRole (2026-08-06,
+    IssuerRole migration). Returns every role_type on file for
+    issuer_id -- zero, one, or several, since an issuer may hold
+    multiple independently-accredited roles. Not called from
+    check_authority()/adjudicate() yet, and not populated with any
+    real data yet -- this is read-access infrastructure only, so the
+    table is genuinely queryable/testable; wiring it into adjudication
+    logic is a separate, not-yet-decided task (see CLAUDE.md's Open
+    Items).
+    """
+    result = await session.execute(
+        select(IssuerRole.role_type).where(IssuerRole.issuer_id == issuer_id)
+    )
+    return list(result.scalars().all())
 
 
 async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneRecord]:
