@@ -37,6 +37,20 @@ NO_GO_EVIDENCE = {
     "sha256_signature": "irrelevant-for-this-test",
 }
 
+ZONE_NO_GO_EVIDENCE = {
+    "claim_id": "CLM-ZONE-301",
+    "decision": "NO_GO",
+    "reason": "Safety Violation: Zone 'ZONE-99' does not exist.",
+    "reason_code": "R-ZONE-01",
+    "authority_binding_id": "BIND-SA-01",
+    "rule_trace": [
+        {"rule_id": "zone_safety_check", "passed": False, "reason": "Safety Violation: Zone 'ZONE-99' does not exist."},
+    ],
+    "evaluated_at": "2026-08-06T10:00:00+00:00",
+    "input_payload": {"claim_id": "CLM-ZONE-301", "issuer_id": "USR-SUP-01", "zone_id": "ZONE-99"},
+    "sha256_signature": "irrelevant-for-this-test",
+}
+
 GO_EVIDENCE = {
     "claim_id": "CLM-101",
     "decision": "GO",
@@ -98,6 +112,30 @@ def test_blocked_screen_renders_for_real_no_go_claim():
     assert "BIND-999" in body
     assert "ptw_precondition_check" in body
     assert '"/static/blocked-screen/blocked-screen.js"' in body
+    # 2026-08-06, Task A: this route now calls resolve_authority() --
+    # R-PTW-01 is deliberately unrouted (see CLAUDE.md's Open Items),
+    # so it resolves via the catch-all, same as before this route
+    # called resolve_authority() at all.
+    assert '"assignedRole": "General Duty Officer"' in body
+
+
+def test_blocked_screen_renders_resolved_role_for_zone_safety_no_go():
+    """Task A's before/after case: R-ZONE-01 now shows a resolved
+    assignedRole ("SA" -- the bare code, since no confirmed human-
+    readable label for SA exists yet in src/core/roles.py's
+    ROLE_TYPE_LABELS; see that module's own comment) where previously
+    this route surfaced no role information at all, just the bare
+    binding ID."""
+    client = _client_with_record(ZONE_NO_GO_EVIDENCE)
+
+    response = client.get("/supervisor/blocked/CLM-ZONE-301")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "CLM-ZONE-301" in body
+    assert "R-ZONE-01" in body
+    assert "BIND-SA-01" in body
+    assert '"assignedRole": "SA"' in body
 
 
 def test_blocked_screen_returns_404_for_unknown_claim():

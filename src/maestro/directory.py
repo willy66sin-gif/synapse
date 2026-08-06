@@ -37,7 +37,7 @@ get it (see src/core/roles.py's own doc comment for the full reasoning).
 from dataclasses import dataclass
 from typing import Optional
 
-from src.core.roles import AuthorityRoleType  # noqa: F401 - re-exported for backward compatibility
+from src.core.roles import AuthorityRoleType, role_type_label  # noqa: F401 - AuthorityRoleType re-exported for backward compatibility
 
 
 @dataclass(frozen=True)
@@ -84,14 +84,16 @@ SUPERVISOR_OVERRIDE_URL = "https://synapse.local/supervisor/override"
 # the same way R-ZONE-01 just did, once/if a real answer exists.
 _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
     "BIND-SA-01",
-    # Left as the bare code, not an expanded English title: no
-    # confirmed definition for what "SA" stands for has been supplied
-    # anywhere in this repo or its handoffs -- inventing one ("Safety
-    # Authority", "Authorised Examiner", or anything else) would be
-    # asserting a translation with no basis, the same discipline
-    # already applied to PE/QP/PI/PA/PM/SA generally (see
-    # src/core/roles.py). Update this label once a real title exists.
-    "SA",
+    # Computed via role_type_label(), not a hardcoded literal -- today
+    # this still renders as the bare code "SA", since SA has no
+    # confirmed label in src/core/roles.py's ROLE_TYPE_LABELS (see that
+    # module's own comment for why: no confirmed definition of what
+    # "SA" stands for has been supplied anywhere in this repo or its
+    # handoffs; inventing one would be asserting a translation with no
+    # basis). Computing it this way means this binding's display label
+    # updates automatically, with no edit needed here, the moment a
+    # real SA label is confirmed and added to ROLE_TYPE_LABELS.
+    role_type_label(AuthorityRoleType.SA),
     None,
     AuthorityRoleType.SA,
 )

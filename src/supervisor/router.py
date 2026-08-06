@@ -37,12 +37,18 @@ override flow above, same pattern. 404 if the claim was never
 adjudicated; 409 if it was but the decision was GO (the Blocked Screen
 is a NO_GO-only surface — a claim existing with the wrong decision is
 a different failure mode than not existing at all, so it gets a
-different status code). Deliberately does not call
-src/maestro/directory.py's resolve_authority() — that's Maestro's job
-when building an OutboundAlert for an actual alert, out of scope here;
-this route only ever surfaces authority_binding_id, which is already
-part of the persisted evidence record itself (None on GO, which this
-route never serves anyway).
+different status code).
+
+Role label resolution (2026-08-06, Task A): this route now DOES call
+src/maestro/directory.py's resolve_authority() -- previously
+deliberately skipped as "Maestro's job, out of scope here", which left
+the screen meant for the person expected to act showing no role
+information at all, just a bare binding ID. Same pattern
+src/frontline/router.py already uses: resolve_authority(zone_id,
+reason_code), then binding.role for the display label (already
+resolved via src/core/roles.py's role_type_label() at binding-
+construction time, not re-resolved here) and binding.binding_id for
+the (still secondary/reference-only, unchanged) trace ID.
 """
 import html
 import json
@@ -53,6 +59,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository import get_db_session
 from src.evidence.repository import fetch_latest_adjudication_record
+from src.maestro.directory import resolve_authority
 from src.supervisor.schemas import OverrideRecord
 
 router = APIRouter(prefix="/supervisor", tags=["supervisor"])
@@ -93,6 +100,9 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
             detail=f"Claim '{claim_id}' is not blocked (decision={evidence['decision']}) — nothing to show.",
         )
 
+    zone_id = evidence.get("input_payload", {}).get("zone_id")
+    binding = resolve_authority(zone_id, evidence["reason_code"])
+
     blocked_screen_data = {
         "evidence": {
             "claim_id": evidence["claim_id"],
@@ -103,6 +113,7 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
             "rule_trace": evidence["rule_trace"],
             "evaluated_at": evidence["evaluated_at"],
         },
+        "assignedRole": binding.role,
         "escalationContact": "Your site supervisor",
         "issuerId": evidence.get("input_payload", {}).get("issuer_id", ""),
         "overrideEndpoint": "/supervisor/override",

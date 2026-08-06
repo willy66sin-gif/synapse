@@ -49,9 +49,11 @@
  *     },
  *     escalationContact: string,   // supplied by caller, mirrors OutboundAlert.escalation_contact
  *     assignedRole: string | null | undefined,  // mirrors OutboundAlert.assigned_role — NOT persisted in
- *                                                // evidence (only authority_binding_id is), so callers that
- *                                                // only have the evidence record (not a live-resolved
- *                                                // OutboundAlert) may leave this unset
+ *                                                // evidence (only authority_binding_id is); GET /supervisor/
+ *                                                // blocked/{claim_id} resolves it live via resolve_authority()
+ *                                                // as of 2026-08-06 (Task A) -- only a caller working from a
+ *                                                // bare evidence record with no live resolution would leave
+ *                                                // this unset now
  *     telemetrySigned: boolean | undefined,  // PLACEHOLDER — see README caveat
  *     overrideEndpoint: string,    // defaults to "/supervisor/override"
  *     issuerId: string,            // pre-fills the override form's issuer_id, if known
