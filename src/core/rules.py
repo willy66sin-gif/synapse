@@ -52,21 +52,83 @@ class RuleOutcome:
 # Machine-readable failure codes for Verdict.reason_code (src/core/evaluator.py).
 # Convention: R-<DOMAIN>-<NUMBER>, one per rule/failure class — not per individual
 # sub-condition within a rule (e.g. every ePTW sub-check still reports R-PTW-01).
+#
+# R-AUTH-01/02/03 (2026-08-06, R-AUTH-01 disambiguation) are a deliberate,
+# documented exception to "one per rule": Rule 1 (authority_check) now
+# produces three, not one, because two of its three failure branches
+# turned out to be honestly distinguishable from claim.work_type alone --
+# see classify_authority_failure()'s doc comment for exactly what is and
+# isn't distinguishable and why.
 REASON_CODE_PTW_PRECONDITION = "R-PTW-01"
 REASON_CODE_AUTHORITY_FAILURE = "R-AUTH-01"
+REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK = "R-AUTH-02"
+REASON_CODE_AUTHORITY_FAILURE_NOMINAL = "R-AUTH-03"
 REASON_CODE_ZONE_SAFETY_FAILURE = "R-ZONE-01"
+
+# Also used by verify_ptw_precondition, below -- moved up so both it and
+# classify_authority_failure() can reference the same, single frozenset.
+HIGH_RISK_WORK_TYPES = frozenset(
+    {WorkType.EXCAVATION, WorkType.LIFTING, WorkType.HOT_WORK, WorkType.CONFINED_SPACE}
+)
+
+
+def classify_authority_failure(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) -> Optional[str]:
+    """
+    Single source of truth for which Rule 1 (authority_check) failure
+    mode applies, if any -- returns None if the claim would pass (not
+    a failure to classify). check_authority() below calls this to
+    decide which RuleOutcome.reason text to build; src/core/evaluator.py's
+    adjudicate() calls it a second time to set Verdict.reason_code --
+    a deliberate duplicate call to the same pure, deterministic
+    function, not a second decision, same pattern already established
+    by src/airlock/router.py's two calls to resolve_authority(). This
+    keeps the two entirely in lockstep: there is exactly one place
+    this branching logic is written, not two copies that could drift.
+
+    What's honestly distinguishable today, and what isn't:
+    - Unauthenticated issuer (issuer_record is None) stays a single,
+      undifferentiated code (R-AUTH-01). This is deliberate, not an
+      oversight: "we don't recognize this issuer" has nothing to do
+      with what they're claiming -- an unknown issuer is unknown
+      whether the claim is excavation or material entry. Splitting
+      this by claim.work_type would invent a distinction the failure
+      itself doesn't actually have.
+    - Insufficient clearance (authority_level < clearance_level) DOES
+      have an honest signal available: claim.work_type, via the same
+      HIGH_RISK_WORK_TYPES distinction verify_ptw_precondition already
+      uses elsewhere in this file -- not a new taxonomy invented for
+      this purpose, the one real categorization already established in
+      this codebase. R-AUTH-02 for high-risk work_type (excavation,
+      lifting, hot work, confined space -- the same permit-requiring
+      categories Rule 0 gates on), R-AUTH-03 for nominal work.
+    - claim.zone_id and claim.action_type are NOT used: zone hazard
+      level isn't available here at all (check_authority never
+      receives zone_record -- that's check_zone_safety's job, Rule 2,
+      which runs after this one), and action_type has no established
+      vocabulary anywhere in this codebase (a plain free string) to
+      honestly categorize against -- using it would mean inventing
+      string-matching heuristics on unstructured text, not
+      distinguishing something the check can actually tell today.
+    """
+    if issuer_record is None:
+        return REASON_CODE_AUTHORITY_FAILURE
+    if claim.authority_level < issuer_record.clearance_level:
+        return REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK if claim.work_type in HIGH_RISK_WORK_TYPES else REASON_CODE_AUTHORITY_FAILURE_NOMINAL
+    return None
 
 
 def check_authority(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) -> RuleOutcome:
     """Rule 1: Authority Check (synapse_mdm.py `adjudicate`, Rule 1)."""
-    if issuer_record is None:
+    failure = classify_authority_failure(claim, issuer_record)
+
+    if failure == REASON_CODE_AUTHORITY_FAILURE:
         return RuleOutcome(
             rule_id="authority_check",
             passed=False,
             reason=f"Authority Failure: Issuer '{claim.issuer_id}' is unauthenticated.",
         )
 
-    if claim.authority_level < issuer_record.clearance_level:
+    if failure is not None:
         return RuleOutcome(
             rule_id="authority_check",
             passed=False,
@@ -93,11 +155,6 @@ def check_zone_safety(claim: ClaimPayload, zone_record: Optional[ZoneRecord]) ->
         )
 
     return RuleOutcome(rule_id="zone_safety_check", passed=True, reason="Zone Safety Validated")
-
-
-HIGH_RISK_WORK_TYPES = frozenset(
-    {WorkType.EXCAVATION, WorkType.LIFTING, WorkType.HOT_WORK, WorkType.CONFINED_SPACE}
-)
 
 
 def verify_ptw_precondition(claim: ClaimPayload) -> RuleOutcome:

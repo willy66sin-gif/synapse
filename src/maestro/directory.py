@@ -23,8 +23,10 @@ untyped ("*", "*") catch-all (role_type=None) -- removing it before
 real typed entries exist would fail every Maestro alert and the
 Frontline Worker screen closed (they all call resolve_authority()),
 which is a different, larger decision than this pass's scope. See
-CLAUDE.md's Open Items for both the role-to-registration binding and
-the reason_code -> role_type routing table, neither decided here.
+CLAUDE.md's Open Items for the role-to-registration binding, still not
+decided. The reason_code -> role_type routing table is now partially
+decided (2026-08-06) -- see the DIRECTORY_MAP entries below for
+exactly what is and isn't routed, and why.
 
 Relocated (2026-08-06): AuthorityRoleType itself now lives in
 src/core/roles.py, re-exported here for backward compatibility (same
@@ -55,16 +57,54 @@ class AuthorityBinding:
 SUPERVISOR_OVERRIDE_URL = "https://synapse.local/supervisor/override"
 
 
-# Starts with exactly one entry: the untyped catch-all default.
-# role_type intentionally left None here -- "General Duty Officer" is
-# not one of the licensed PE/QP/PI/PA/PM/SA roles, and no real typed
-# entries are populated in this pass (schema/structure only). Real
-# (zone_id, reason_code) and ("*", reason_code) entries -- with real
-# role_type values -- get added here as actual site authorities are
-# identified and bound to real registrations; contact_id stays None
-# until a real contact channel exists.
+# reason_code -> AuthorityRoleType routing (2026-08-06, Task 3 of the
+# "Authority Role Model" handoff). Built on top of the precedence
+# mechanism this file already had (the ("*", reason_code) tier exists
+# specifically for this) -- not a separate table, since this IS a
+# (zone_id, reason_code) lookup, just keyed generically on reason_code
+# rather than a specific zone.
+#
+# Only R-ZONE-01 -> SA is added: it's the one mapping actually
+# confirmed as unambiguous ("R-ZONE-01 -> SA are clean", per the
+# handoff that introduced the five reason codes this routes). The
+# other four reason codes are deliberately left unrouted (fall through
+# to the ("*", "*") catch-all below), not guessed at:
+#   - R-PTW-01: the same handoff paired it with "PI/PA" together, not
+#     a single role -- AuthorityBinding.role_type is one value per
+#     binding, and nothing confirms whether PI or PA (or either) is
+#     the actual single answer. Routing it would mean picking one
+#     without grounds to.
+#   - R-AUTH-01/02/03: R-AUTH-01 is an unauthenticated-issuer failure,
+#     not a domain/technical one -- no PE/QP/PI/PA/PM/SA role is an
+#     honest fit for "we don't know who submitted this." R-AUTH-02/03
+#     are new (2026-08-06, R-AUTH-01 disambiguation) and postdate the
+#     "clean" assessment above entirely -- nothing has confirmed a
+#     role for them yet, so nothing is asserted here.
+# Each of these four can gain its own ("*", reason_code) entry later,
+# the same way R-ZONE-01 just did, once/if a real answer exists.
+_ZONE_SAFETY_AUTHORITY = AuthorityBinding(
+    "BIND-SA-01",
+    # Left as the bare code, not an expanded English title: no
+    # confirmed definition for what "SA" stands for has been supplied
+    # anywhere in this repo or its handoffs -- inventing one ("Safety
+    # Authority", "Authorised Examiner", or anything else) would be
+    # asserting a translation with no basis, the same discipline
+    # already applied to PE/QP/PI/PA/PM/SA generally (see
+    # src/core/roles.py). Update this label once a real title exists.
+    "SA",
+    None,
+    AuthorityRoleType.SA,
+)
+
+# Starts with two entries: the untyped catch-all default, and the one
+# confirmed reason_code routing above. role_type intentionally left
+# None on the catch-all -- "General Duty Officer" is not one of the
+# licensed PE/QP/PI/PA/PM/SA roles. Real (zone_id, reason_code) entries
+# -- and real contact_id values -- get added here as actual site
+# authorities are identified and bound to real registrations.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
+    ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
 }
 
 

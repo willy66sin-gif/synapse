@@ -67,15 +67,37 @@ def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(
     assert result != CATCH_ALL
 
 
-def test_real_directory_map_resolves_via_catch_all_only():
+def test_real_directory_map_resolves_via_catch_all_for_unrouted_reason_codes():
     """Against the actual shipped DIRECTORY_MAP (not monkeypatched):
-    since only the catch-all is seeded, every lookup -- regardless of
-    zone_id/reason_code -- must resolve to it."""
-    for zone_id, reason_code in [("ZONE-01", "R-PTW-01"), ("ZONE-99", "R-AUTH-01"), (None, None)]:
+    R-ZONE-01 has its own routing entry as of 2026-08-06 (see the
+    dedicated test below) -- every OTHER reason_code, deliberately left
+    unrouted (see DIRECTORY_MAP's own comment for exactly why each
+    one), still falls through to the catch-all."""
+    for zone_id, reason_code in [
+        ("ZONE-01", "R-PTW-01"),
+        ("ZONE-99", "R-AUTH-01"),
+        ("ZONE-01", "R-AUTH-02"),
+        ("ZONE-01", "R-AUTH-03"),
+        (None, None),
+    ]:
         result = resolve_authority(zone_id, reason_code)
         assert result.binding_id == "BIND-999"
         assert result.role == "General Duty Officer"
         assert result.contact_id is None
+        assert result.role_type is None
+
+
+def test_real_directory_map_routes_r_zone_01_to_sa():
+    """The one confirmed reason_code routing entry (2026-08-06, Task 3
+    of the Authority Role Model handoff): R-ZONE-01 resolves to SA via
+    the ("*", "R-ZONE-01") global-reason-code-default tier, not the
+    catch-all -- for any zone_id, since no more-specific (zone_id,
+    reason_code) entry is seeded either."""
+    for zone_id in ("ZONE-01", "ZONE-99", None):
+        result = resolve_authority(zone_id, "R-ZONE-01")
+        assert result.binding_id == "BIND-SA-01"
+        assert result.role == "SA"
+        assert result.role_type == AuthorityRoleType.SA
 
 
 def test_resolve_authority_raises_if_catch_all_missing(monkeypatch):

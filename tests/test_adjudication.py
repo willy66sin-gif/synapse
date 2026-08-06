@@ -76,15 +76,45 @@ def test_unauthenticated_issuer_is_rejected():
     assert verdict["reason_code"] == "R-AUTH-01"
 
 
-def test_insufficient_authority_level_is_rejected():
-    """Authority Check branch: authority_level below the issuer's clearance_level."""
-    claim = _claim(issuer_id="USR-ENG-02", authority_level=0)
+def test_insufficient_authority_level_on_nominal_work_is_rejected():
+    """Authority Check branch: authority_level below the issuer's
+    clearance_level, on NOMINAL_CIVIL work -- R-AUTH-03 (2026-08-06
+    R-AUTH-01 disambiguation), not R-AUTH-01 (that code is now
+    unauthenticated-issuer-only, a different failure mode)."""
+    claim = _claim(issuer_id="USR-ENG-02", authority_level=0)  # work_type: NOMINAL_CIVIL, from _claim()'s base
 
     verdict = adjudicate(claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE)
 
     assert verdict["decision"] == "NO_GO"
     assert "Authority Failure" in verdict["reason"]
-    assert verdict["reason_code"] == "R-AUTH-01"
+    assert verdict["reason_code"] == "R-AUTH-03"
+
+
+def test_insufficient_authority_level_on_high_risk_work_is_rejected():
+    """Same insufficient-clearance failure, but on a HIGH_RISK_WORK_TYPES
+    work_type -- R-AUTH-02, the other half of the 2026-08-06 split.
+    ptw_context is a valid, matching permit so Rule 0 (ePTW) passes and
+    the claim actually reaches Rule 1 (authority) to be rejected there."""
+    claim = _claim(
+        issuer_id="USR-ENG-02",
+        authority_level=0,
+        work_type="EXCAVATION",
+        ptw_context={
+            "ptw_id": "PTW-900",
+            "status": "APPROVED",
+            "valid_from": "2020-01-01T00:00:00+00:00",
+            "valid_until": "2099-01-01T00:00:00+00:00",
+            "permit_type": "EXCAVATION",
+            "zone_id": "ZONE-01",
+            "issuer_id": "USR-ENG-02",
+        },
+    )
+
+    verdict = adjudicate(claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE)
+
+    assert verdict["decision"] == "NO_GO"
+    assert "Authority Failure" in verdict["reason"]
+    assert verdict["reason_code"] == "R-AUTH-02"
 
 
 def test_unknown_zone_is_blocked():

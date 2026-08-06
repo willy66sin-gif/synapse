@@ -142,6 +142,9 @@ def test_from_evidence_record_builds_from_real_evidence_go():
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():
+    """R-ZONE-01 now resolves via its own reason_code routing entry
+    (2026-08-06, Task 3), not the ("*", "*") catch-all -- see
+    src/maestro/directory.py's DIRECTORY_MAP."""
     claim_payload = {"claim_id": "CLM-102", "issuer_id": "USR-SUP-01"}
     verdict = adjudicate(
         _claim(claim_payload["claim_id"], claim_payload["issuer_id"], zone_id="ZONE-99"),
@@ -156,8 +159,8 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
     assert alert.conflicting_condition is not None
     assert "Safety Violation" in alert.conflicting_condition.reason
     assert alert.reason_code == "R-ZONE-01"
-    assert alert.authority_binding_id == "BIND-999"
-    assert alert.assigned_role == "General Duty Officer"
+    assert alert.authority_binding_id == "BIND-SA-01"
+    assert alert.assigned_role == "SA"
 
 
 def test_from_evidence_record_carries_eptw_reason_code_through():

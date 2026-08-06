@@ -24,13 +24,13 @@ from typing import Optional, TypedDict
 
 from src.airlock.schemas import ClaimPayload
 from src.core.rules import (
-    REASON_CODE_AUTHORITY_FAILURE,
     REASON_CODE_PTW_PRECONDITION,
     REASON_CODE_ZONE_SAFETY_FAILURE,
     IssuerRecord,
     ZoneRecord,
     check_authority,
     check_zone_safety,
+    classify_authority_failure,
     verify_ptw_precondition,
 )
 
@@ -76,7 +76,13 @@ def adjudicate(
             decision="NO_GO",
             reason=authority_outcome.reason,
             rule_trace=rule_trace,
-            reason_code=REASON_CODE_AUTHORITY_FAILURE,
+            # Second call to the same pure, deterministic classifier
+            # check_authority() already used internally -- not a second
+            # decision, same pattern as src/airlock/router.py's two calls
+            # to resolve_authority(). See classify_authority_failure()'s
+            # doc comment (src/core/rules.py) for why R-AUTH-01/02/03
+            # split the way they do.
+            reason_code=classify_authority_failure(claim, issuer_record),
         )
 
     zone_outcome = check_zone_safety(claim, zone_record)

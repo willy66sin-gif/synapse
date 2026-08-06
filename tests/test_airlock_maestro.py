@@ -170,6 +170,9 @@ def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro
 
 
 def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
+    """R-ZONE-01 now resolves via its own reason_code routing entry
+    (2026-08-06, Task 3), not the ("*", "*") catch-all -- see
+    src/maestro/directory.py's DIRECTORY_MAP."""
     client = _client_with_stubs(issuer_row=SUPERINTENDENT_ROW, zone_data=None)
 
     response = client.post("/airlock/claims", json=_claim(claim_id="CLM-ZONE-201", zone_id="ZONE-99"))
@@ -177,14 +180,14 @@ def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-ZONE-01"
-    assert response.json()["authority_binding_id"] == "BIND-999"
+    assert response.json()["authority_binding_id"] == "BIND-SA-01"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-ZONE-01"
         assert alert.conflicting_condition.rule_id == "zone_safety_check"
-        assert alert.authority_binding_id == "BIND-999"
-        assert alert.assigned_role == "General Duty Officer"
+        assert alert.authority_binding_id == "BIND-SA-01"
+        assert alert.assigned_role == "SA"
 
 
 def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
