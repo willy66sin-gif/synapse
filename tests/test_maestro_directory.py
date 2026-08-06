@@ -11,7 +11,7 @@ than seeding the shipped module with fabricated data.
 import pytest
 
 from src.maestro import directory
-from src.maestro.directory import AuthorityBinding, resolve_authority
+from src.maestro.directory import AuthorityBinding, AuthorityRoleType, resolve_authority
 
 SPECIFIC = AuthorityBinding("BIND-001", "Zone A Safety Officer", "whatsapp:+6591234567")
 REASON_DEFAULT = AuthorityBinding("BIND-101", "Duty WSO", "whatsapp:+6590000001")
@@ -86,3 +86,35 @@ def test_resolve_authority_raises_if_catch_all_missing(monkeypatch):
 
     with pytest.raises(KeyError):
         resolve_authority("ZONE-01", "R-PTW-01")
+
+
+# --- Supervisor Override Retirement (2026-08-05): role_type schema restructuring ---
+
+
+def test_real_catch_all_has_no_role_type():
+    """The shipped catch-all is deliberately untyped: "General Duty
+    Officer" is not one of the licensed PE/QP/PI/PA/PM/SA roles, and no
+    real typed entries are populated in this pass (schema/structure
+    only -- see directory.py's own comment)."""
+    result = resolve_authority("ZONE-01", "R-PTW-01")
+
+    assert result.role_type is None
+
+
+def test_authority_binding_accepts_a_role_type():
+    """Schema now supports a typed entry -- not populated in
+    DIRECTORY_MAP yet, but the shape exists for when real PE/QP/PI/PA/
+    PM/SA entries are added (a separate, future task)."""
+    binding = AuthorityBinding("BIND-PE-01", "Engineer of Record", "whatsapp:+6591112222", AuthorityRoleType.PE)
+
+    assert binding.role_type == AuthorityRoleType.PE
+
+
+def test_authority_role_type_has_exactly_the_six_specified_codes():
+    """PR (Permit Receiver) must never be a member: it names the
+    executing worker/crew, the same category as the Frontline Worker
+    persona, not an approving/certifying authority."""
+    codes = {member.value for member in AuthorityRoleType}
+
+    assert codes == {"PE", "QP", "PI", "PA", "PM", "SA"}
+    assert "PR" not in codes

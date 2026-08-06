@@ -15,7 +15,6 @@ from src.airlock.schemas import ClaimPayload, WorkType
 from src.core.evaluator import adjudicate
 from src.core.rules import IssuerRecord, ZoneRecord
 from src.evidence.emitter import emit_evidence
-from src.maestro.directory import SUPERVISOR_OVERRIDE_URL
 from src.maestro.schemas import OutboundAlert, RuleConditionResult
 
 SUPERINTENDENT = IssuerRecord(role="SUPERINTENDENT", clearance_level=3)
@@ -137,8 +136,9 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     assert alert.authority_binding_id == "BIND-999"
     assert alert.assigned_role == "General Duty Officer"
     assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet
-    assert alert.escalation_contact.startswith(SUPERVISOR_OVERRIDE_URL)
-    assert "BIND-999" in alert.escalation_contact
+    # Supervisor Override Retirement (5 Aug 2026): states the resolved authority
+    # directly, not an override URL -- see OutboundAlert.from_evidence_record().
+    assert alert.escalation_contact == "General Duty Officer (BIND-999)"
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():

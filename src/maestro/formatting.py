@@ -6,8 +6,12 @@ every channel adapter renders alerts through render_alert_text, so
 neither rule can be silently dropped by an individual adapter:
 
 - Supervisor UI Principle: never a standalone verdict.
-- Escalation Requirement: every alert states how to escalate/override,
+- Escalation Requirement: every alert states how to escalate,
   regardless of channel or decision.
+
+Wording (2026-08-05, Supervisor Override Retirement): dropped "escalate/
+override" -- override is retired, so the phrasing must not imply the
+escalation contact can action one.
 """
 from src.maestro.schemas import OutboundAlert
 
@@ -21,4 +25,4 @@ def render_alert_text(alert: OutboundAlert) -> str:
         condition = alert.conflicting_condition
         body = f"Claim {alert.claim_id}: NO-GO — rule '{condition.rule_id}' failed: {condition.reason}"
 
-    return f"{body} To escalate/override, contact: {alert.escalation_contact}."
+    return f"{body} To escalate, contact: {alert.escalation_contact}."

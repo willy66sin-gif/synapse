@@ -21,7 +21,6 @@ from src.airlock.schemas import WorkType
 from src.core.models import AuthorizedIssuer
 from src.core.repository import get_db_session, get_redis_client
 from src.main import app
-from src.maestro.directory import SUPERVISOR_OVERRIDE_URL
 from src.maestro.schemas import DeliveryResult
 
 SUPERINTENDENT_ROW = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDENT", clearance_level=3)
@@ -200,5 +199,6 @@ def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
     assert len(maestro_calls) == 2
     for _, alert in maestro_calls:
         assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet -> role fallback
-        assert alert.escalation_contact.startswith(SUPERVISOR_OVERRIDE_URL)
-        assert "BIND-999" in alert.escalation_contact
+        # Supervisor Override Retirement (5 Aug 2026): escalation_contact states the
+        # resolved authority directly, not an override URL -- see src/maestro/schemas.py.
+        assert alert.escalation_contact == "General Duty Officer (BIND-999)"

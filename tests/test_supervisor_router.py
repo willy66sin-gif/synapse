@@ -1,18 +1,14 @@
 """
-POST /supervisor/override tests.
+POST /supervisor/override tests -- retirement (2026-08-05).
 
-Unlike tests/test_airlock.py's HTTP tests (which only ever exercise
-malformed-body rejection and never reach the handler body), these
-tests need the handler's actual authorization/existence-check
-branches to run — so the fake session here is a real stub capable of
-returning controlled query results per table, not just `yield None`.
-No live Postgres/Redis is used; this stays consistent with the
-existing "testable without database side-effects" principle by
-injecting fake data at the session boundary instead.
+Per CLAUDE.md's Supervisor Override Retirement principle: the endpoint
+now returns 410 Gone unconditionally, regardless of issuer/claim
+state, with zero database access. These tests replace the old
+403/404/200 behavior tests (removed -- that behavior no longer
+exists), but keep the same stub-session infrastructure to positively
+prove the retired handler never touches the database at all: it never
+executes a query, never adds a row, never commits.
 """
-import hashlib
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -38,15 +34,20 @@ class _StubResult:
 
 
 class _StubSession:
-    """Returns a canned row keyed by which table the query targets."""
+    """Returns a canned row keyed by which table the query targets.
+    For these retirement tests, execute() should never be called at
+    all -- retained from the pre-retirement test suite so a regression
+    that starts querying again would be caught immediately."""
 
     def __init__(self, issuer_row=None, adjudication_row=None):
         self._issuer_row = issuer_row
         self._adjudication_row = adjudication_row
+        self.executed = False
         self.added = []
         self.committed = False
 
     async def execute(self, stmt):
+        self.executed = True
         table_name = stmt.column_descriptions[0]["entity"].__tablename__
         if table_name == "authorized_issuers":
             return _StubResult(self._issuer_row)
@@ -75,7 +76,10 @@ def _clear_overrides():
     app.dependency_overrides.clear()
 
 
-def test_malformed_override_body_rejected():
+def test_malformed_override_body_still_422s_at_schema_boundary():
+    """Unrelated to retirement: a structurally invalid body still fails
+    closed via Pydantic before the (now-410) handler body ever runs --
+    same fail-closed discipline as src/airlock/router.py."""
     async def _fake_db_session():
         yield None
 
@@ -86,28 +90,30 @@ def test_malformed_override_body_rejected():
     assert response.status_code == 422
 
 
-def test_unauthenticated_issuer_rejected_with_403():
+def test_override_returns_410_regardless_of_unauthenticated_issuer():
     stub = _StubSession(issuer_row=None, adjudication_row=None)
     with _client_with_stub(stub) as client:
         response = client.post("/supervisor/override", json=VALID_OVERRIDE)
 
-    assert response.status_code == 403
-    assert "Authority Failure" in response.json()["detail"]
-    assert stub.added == []  # rejected: never persisted
+    assert response.status_code == 410
+    assert "retired" in response.json()["detail"].lower()
+    assert stub.executed is False  # retired: never even queries the database
 
 
-def test_nonexistent_claim_rejected_with_404():
+def test_override_returns_410_regardless_of_nonexistent_claim():
     issuer_row = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDENT", clearance_level=3)
     stub = _StubSession(issuer_row=issuer_row, adjudication_row=None)
     with _client_with_stub(stub) as client:
         response = client.post("/supervisor/override", json=VALID_OVERRIDE)
 
-    assert response.status_code == 404
-    assert "Override Rejected" in response.json()["detail"]
-    assert stub.added == []  # rejected: never persisted
+    assert response.status_code == 410
+    assert stub.executed is False
 
 
-def test_valid_override_accepted_end_to_end():
+def test_override_returns_410_even_for_a_well_formed_previously_valid_request():
+    """The exact request that used to be accepted end-to-end (200,
+    persisted, Maestro-notified) now gets 410 and has none of those
+    side effects -- retirement means retirement, not a narrower gate."""
     issuer_row = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDENT", clearance_level=3)
     original_evidence = {
         "claim_id": "CLM-102",
@@ -124,27 +130,10 @@ def test_valid_override_accepted_end_to_end():
     with _client_with_stub(stub) as client:
         response = client.post("/supervisor/override", json=VALID_OVERRIDE)
 
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 410
+    assert "/airlock/claims" in response.json()["detail"]  # points at the replacement mechanism
 
-    evidence = body["evidence"]
-    assert evidence["type"] == "OverrideRecord"
-    assert evidence["claim_id"] == "CLM-102"
-    assert evidence["issuer_id"] == "USR-SUP-01"
-
-    # Evidence-signature integrity, same style as tests/test_evidence.py
-    unsigned = {k: v for k, v in evidence.items() if k != "sha256_signature"}
-    expected_signature = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
-    assert evidence["sha256_signature"] == expected_signature
-
-    # Accepted: persisted for real (via the stub session)
-    assert len(stub.added) == 1
-    assert stub.committed is True
-
-    # Maestro wiring: both stub channels notified, escalation info present
-    notifications = body["notifications"]
-    channels = {n["channel"] for n in notifications}
-    assert channels == {"whatsapp", "telegram"}
-    for notification in notifications:
-        assert notification["delivered"] is True
-        assert "USR-SUP-01" in notification["detail"]
+    # No side effects at all: no query, no persisted row, no commit.
+    assert stub.executed is False
+    assert stub.added == []
+    assert stub.committed is False

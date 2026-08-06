@@ -14,14 +14,16 @@ Principles: the Supervisor UI Principle (never a standalone verdict —
 GO/NO_GO is always paired with the full rule trace, and a NO_GO always
 carries the specific failing condition), and the Escalation
 Requirement (every alert, GO or NO_GO, must carry a contact point for
-requesting an override — Maestro only ever displays it, never acts on
-it).
+escalation — Maestro only ever displays it, never acts on it). As of
+the Supervisor Override Retirement (2026-08-05), that contact point no
+longer names an override mechanism — see from_evidence_record()'s own
+doc comment.
 """
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from src.maestro.directory import SUPERVISOR_OVERRIDE_URL, resolve_authority
+from src.maestro.directory import resolve_authority
 
 
 class RuleConditionResult(BaseModel):
@@ -83,18 +85,25 @@ class OutboundAlert(BaseModel):
         reason_code) itself — keyed on the adjudicated failure reason,
         not on claim_type/work_type — and populates recipient_id,
         authority_binding_id, assigned_role, and escalation_contact
-        (built from directory.SUPERVISOR_OVERRIDE_URL, a fixed system
-        constant, not a per-binding field) directly from the resolved
-        AuthorityBinding. This applies uniformly to GO and NO_GO alike
-        (GO resolves reason_code=None, landing on the ("*", "*")
-        catch-all) — the Escalation Requirement already applies to
-        every alert regardless of decision. recipient_id falls back to
-        the binding's role name when no real contact_id is on file yet
-        (true for the catch-all today), rather than fabricating one.
-        zone_id is not on the evidence record itself — Evidence stays
-        decoupled from Airlock's ClaimPayload shape — so it's passed
-        explicitly by the caller instead of reached for inside
+        directly from the resolved AuthorityBinding. This applies
+        uniformly to GO and NO_GO alike (GO resolves reason_code=None,
+        landing on the ("*", "*") catch-all) — the Escalation
+        Requirement already applies to every alert regardless of
+        decision. recipient_id falls back to the binding's role name
+        when no real contact_id is on file yet (true for the catch-all
+        today), rather than fabricating one. zone_id is not on the
+        evidence record itself — Evidence stays decoupled from
+        Airlock's ClaimPayload shape — so it's passed explicitly by
+        the caller instead of reached for inside
         evidence["input_payload"].
+
+        Supervisor Override Retirement (2026-08-05): escalation_contact
+        no longer builds a directory.SUPERVISOR_OVERRIDE_URL link — the
+        override endpoint it pointed to is retired, and an escalation
+        contact must not point somewhere that no longer does anything.
+        It now states the resolved authority directly (role and
+        binding_id), matching what the Frontline Worker screen already
+        shows for the same resolved binding.
         """
         rule_trace = [RuleConditionResult(**rule) for rule in evidence["rule_trace"]]
         conflicting = None
@@ -103,7 +112,7 @@ class OutboundAlert(BaseModel):
 
         binding = resolve_authority(zone_id, evidence["reason_code"])
         recipient_id = binding.contact_id or binding.role
-        escalation_contact = f"{SUPERVISOR_OVERRIDE_URL}?claim_id={evidence['claim_id']}&binding={binding.binding_id}"
+        escalation_contact = f"{binding.role} ({binding.binding_id})"
 
         return cls(
             claim_id=evidence["claim_id"],
