@@ -12,9 +12,9 @@ start, not just the first.
 SQLAlchemy only registers a table on Base.metadata when its model
 class has actually been imported somewhere — so every models.py in
 the app (src/core/models.py, src/evidence/models.py,
-src/supervisor/models.py, src/intake/models.py) must be imported
-here, even though none of their classes are referenced directly below,
-or their tables silently never get created.
+src/supervisor/models.py, src/intake/models.py, src/telemetry/models.py)
+must be imported here, even though none of their classes are
+referenced directly below, or their tables silently never get created.
 
 This is schema *creation*, not a migration tool. Deliberate choice for
 this project's stage: no production data, no schema-evolution history,
@@ -39,6 +39,7 @@ from src.core.models import Base
 from src.evidence import models as _evidence_models  # noqa: F401 - imported for its table-registration side effect
 from src.intake import models as _intake_models  # noqa: F401 - imported for its table-registration side effect
 from src.supervisor import models as _supervisor_models  # noqa: F401 - imported for its table-registration side effect
+from src.telemetry import models as _telemetry_models  # noqa: F401 - imported for its table-registration side effect
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY_SECONDS = 2
