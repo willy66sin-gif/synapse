@@ -47,3 +47,16 @@ Reachable in the running app the same way `blocked-screen` is (`src/main.py` mou
 ### Try it
 
 Open `demo.html` directly in a browser (no server, no build step) for static GO/NO_GO fixtures. For real persisted data, adjudicate a claim via `POST /airlock/claims` and then visit `GET /frontline/blocked/{claim_id}` on the running API.
+
+## `gateway-readiness/` — UX PROTOTYPE, not a working checker
+
+Design Gateway readiness screen for a future CORENET X / IFC+SG submission check. **Unlike every other component in this directory, this one has no backend behind it at all** — no route, no repository read, no rule evaluation. It exists to test the interaction model (progressive disclosure per element type, GO/NO_GO framing, "who needs to act") before any real IFC parsing or SGPset_ validation logic is built; see CLAUDE.md's IFC+SG scope note and `src/ifc_sg/schemas.py`'s `SubmissionElementSpec`, which this component's data shape loosely follows.
+
+- **No real regulatory data anywhere.** Element types (Door/Wall/Space), IFC class labels, `assignedRole` titles, and every `SGPset_*` field name in `demo.html` are invented placeholders — no real SGPset_ field catalogue exists in this repo (see `src/ifc_sg/schemas.py`'s module docstring). Field names are deliberately suffixed `_ExamplePlaceholder_` so they can never be mistaken for a real regulatory field name if copied out of context.
+- **Permanent "EXAMPLE DATA" banner.** Every other component here renders real persisted data and so has nothing to caveat; this one never does, so the banner is non-dismissible and renders on every state, including empty. This is the display-layer instance of CLAUDE.md's fail-closed doctrine — a mockup that reads as a real compliance result would itself be a compliance failure.
+- **Decision is still caller-supplied, never computed here** — same "Core decides, display renders" discipline as `<blocked-screen>`/`<frontline-screen>`, even though today's "caller" is just `demo.html`'s static fixture data rather than a real adjudication. Per-element MISSING/COMPLETE status *is* derived client-side, but only as a display transform over already-provided per-field `present` booleans (mirrors `<blocked-screen>`'s conflicting-condition lookup over `rule_trace`), not new decision logic.
+- **Progressive disclosure** via native `<details>`/`<summary>` per element type: collapsed shows type, status, and assigned actor; expanded shows the field-level checklist. No custom ARIA needed — the native elements are keyboard-operable and screen-reader-friendly by default.
+
+### Try it
+
+Open `demo.html` directly in a browser (no server, no build step, no API needed — there is no API for this one) for a NOT-READY and a READY fixture.

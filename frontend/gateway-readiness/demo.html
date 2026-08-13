@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gateway Readiness — Demo Fixtures (EXAMPLE DATA)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; padding: 2rem; }
+    .fixture { max-width: 480px; margin: 0 auto 2rem; }
+    .fixture h2 { font-size: 0.9rem; color: #666; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="fixture">
+    <h2>NOT READY — two element types missing fields</h2>
+    <gateway-readiness id="not-ready"></gateway-readiness>
+  </div>
+
+  <div class="fixture">
+    <h2>READY — every element type complete</h2>
+    <gateway-readiness id="ready"></gateway-readiness>
+  </div>
+
+  <script type="module" src="./gateway-readiness.js"></script>
+  <script type="module">
+    // All values below are invented placeholder fixture data for this UX
+    // prototype only — none of it is real SGPset_ field data (no such
+    // catalogue exists in this repo yet; see src/ifc_sg/schemas.py) and
+    // none of it reflects any real project. See CLAUDE.md's IFC+SG scope
+    // note and frontend/README.md's Gateway Readiness section.
+
+    document.getElementById("not-ready").data = {
+      projectId: "PRJ-EXAMPLE-001",
+      jurisdictionCode: "SG",
+      decision: "NO_GO",
+      elements: [
+        {
+          elementType: "Door",
+          ifcClass: "IfcDoor",
+          assignedRole: "BIM Coordinator",
+          requiredFields: [
+            { field: "SGPset_Door_ExamplePlaceholder_FireRating", present: true },
+            { field: "SGPset_Door_ExamplePlaceholder_ClearWidth", present: false },
+            { field: "SGPset_Door_ExamplePlaceholder_AccessibilityCompliant", present: false },
+          ],
+        },
+        {
+          elementType: "Wall",
+          ifcClass: "IfcWall",
+          assignedRole: "Structural Engineer",
+          requiredFields: [
+            { field: "SGPset_Wall_ExamplePlaceholder_FireRating", present: true },
+            { field: "SGPset_Wall_ExamplePlaceholder_LoadBearing", present: true },
+          ],
+        },
+        {
+          elementType: "Space",
+          ifcClass: "IfcSpace",
+          assignedRole: "MEP Engineer",
+          requiredFields: [
+            { field: "SGPset_SpaceDimension_ExamplePlaceholder_NetFloorArea", present: false },
+            { field: "SGPset_SpaceDimension_ExamplePlaceholder_VentilationRate", present: false },
+          ],
+        },
+      ],
+    };
+
+    document.getElementById("ready").data = {
+      projectId: "PRJ-EXAMPLE-002",
+      jurisdictionCode: "SG",
+      decision: "GO",
+      elements: [
+        {
+          elementType: "Door",
+          ifcClass: "IfcDoor",
+          assignedRole: "BIM Coordinator",
+          requiredFields: [
+            { field: "SGPset_Door_ExamplePlaceholder_FireRating", present: true },
+            { field: "SGPset_Door_ExamplePlaceholder_ClearWidth", present: true },
+          ],
+        },
+        {
+          elementType: "Wall",
+          ifcClass: "IfcWall",
+          assignedRole: "Structural Engineer",
+          requiredFields: [
+            { field: "SGPset_Wall_ExamplePlaceholder_FireRating", present: true },
+            { field: "SGPset_Wall_ExamplePlaceholder_LoadBearing", present: true },
+          ],
+        },
+      ],
+    };
+  </script>
+</body>
+</html>
