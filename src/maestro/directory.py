@@ -83,10 +83,13 @@ read it.
    requested, and RE is not itself a modeled role (see
    AuthorityRoleType.RTO's comment for why).
 
-PI is untouched by this pass. Same fail-closed treatment as
-ClaimPayload's jurisdiction_code: required wherever a role_type is
-PI, no default value, no guessed label -- see src/core/roles.py's own
-comment for where that's enforced (by omission from ROLE_TYPE_LABELS).
+PI REMOVED (2026-08-14, same day as the above, confirmed category
+error): "PI" here referred to Principal Investigator, an academic
+research role, not a construction-authority gate -- see
+src/core/roles.py's own doc comment for the full reasoning. Every
+reference to PI below this point in the module's history (the
+R-PTW-01 routing comment) is updated to reflect that it's gone, not
+merely unconfirmed.
 """
 from dataclasses import dataclass, field
 from enum import Enum
@@ -145,13 +148,20 @@ SUPERVISOR_OVERRIDE_URL = "https://synapse.local/supervisor/override"
 # handoff that introduced the five reason codes this routes). The
 # other four reason codes are deliberately left unrouted (fall through
 # to the ("*", "*") catch-all below), not guessed at:
-#   - R-PTW-01: the same handoff paired it with "PI/PA" together, not
-#     a single role -- AuthorityBinding.role_type is one value per
-#     binding, and nothing confirms whether PI or PA (or either) is
-#     the actual single answer. Routing it would mean picking one
-#     without grounds to.
+#   - R-PTW-01: the handoff that introduced this routing table paired
+#     it with "PI/PA" together, not a single role. PI has since been
+#     removed outright as a category error (2026-08-14 -- see
+#     src/core/roles.py's own doc comment: it named an academic
+#     research role, not a construction authority), which narrows the
+#     original pairing to PA alone -- but that narrowing is an
+#     elimination, not a confirmation. The original handoff never said
+#     "PA is the answer," only "it's PI or PA (or both)"; removing the
+#     wrong option doesn't retroactively confirm the remaining one.
+#     R-PTW-01 stays unrouted until PA is independently confirmed, not
+#     promoted by default because its erroneous alternative was
+#     deleted.
 #   - R-AUTH-01/02/03: R-AUTH-01 is an unauthenticated-issuer failure,
-#     not a domain/technical one -- no PE/QP/PI/PA/PM/SA role is an
+#     not a domain/technical one -- no PE/QP/PA/PM/SA role is an
 #     honest fit for "we don't know who submitted this." R-AUTH-02/03
 #     are new (2026-08-06, R-AUTH-01 disambiguation) and postdate the
 #     "clean" assessment above entirely -- nothing has confirmed a
@@ -177,7 +187,7 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 # Starts with two entries: the untyped catch-all default, and the one
 # confirmed reason_code routing above. role_type intentionally left
 # None on the catch-all -- "General Duty Officer" is not one of the
-# licensed PE/QP/PI/PA/PM/SA/QE/RTO roles. Real (zone_id, reason_code)
+# licensed PE/QP/PA/PM/SA/QE/RTO roles. Real (zone_id, reason_code)
 # entries -- and real contact_id/discipline/activation values -- get
 # added here as actual site authorities are identified and bound to
 # real registrations.

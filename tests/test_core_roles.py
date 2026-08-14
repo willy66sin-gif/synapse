@@ -1,11 +1,12 @@
 """
 src/core/roles.py: role_type_label() tests (2026-08-06, Task A;
-extended 2026-08-14 for QE/RTO).
+extended 2026-08-14 for QE/RTO; PI removed 2026-08-14 as a confirmed
+category error -- see AuthorityRoleType's own doc comment).
 
 ROLE_TYPE_LABELS is deliberately incomplete -- only PE and QP are
-confidently known human-readable labels; PI/PA/PM/SA/QE/RTO fall back
-to their bare code. These tests assert that split explicitly, so a
-future edit that guesses at one of the unconfirmed six gets caught
+confidently known human-readable labels; PA/PM/SA/QE/RTO fall back to
+their bare code. These tests assert that split explicitly, so a
+future edit that guesses at one of the unconfirmed five gets caught
 here rather than silently shipped.
 """
 from src.core.roles import AuthorityRoleType, Discipline, role_type_label
@@ -17,10 +18,12 @@ def test_confirmed_labels_resolve_to_human_readable_text():
 
 
 def test_unconfirmed_labels_fall_back_to_the_bare_code():
-    """PI/PA/PM/SA/QE/RTO have no confirmed expansion -- falling back
-    to the code itself is the honest behavior, not a guess dressed up
-    as a label."""
-    assert role_type_label(AuthorityRoleType.PI) == "PI"
+    """PA/PM/SA/QE/RTO have no confirmed expansion -- falling back to
+    the code itself is the honest behavior, not a guess dressed up as
+    a label. (PI is not included here -- it was never in this
+    "unconfirmed but plausible" category; see
+    test_pi_is_not_reintroduced_without_grounded_construction_authority_reason
+    below.)"""
     assert role_type_label(AuthorityRoleType.PA) == "PA"
     assert role_type_label(AuthorityRoleType.PM) == "PM"
     assert role_type_label(AuthorityRoleType.SA) == "SA"
@@ -36,20 +39,39 @@ def test_none_role_type_resolves_to_none():
     assert role_type_label(None) is None
 
 
-def test_authority_role_type_has_exactly_the_eight_confirmed_codes():
+def test_authority_role_type_has_exactly_the_seven_confirmed_codes():
     """Grown from six to eight (2026-08-14, GC discipline-split /
-    RTO-RE-QP handoff): QE and RTO added, both with no confirmed label
-    (see test_unconfirmed_labels_fall_back_to_the_bare_code). PR
-    (Permit Receiver) must never be a member -- see
+    RTO-RE-QP handoff: QE and RTO added, both with no confirmed label
+    -- see test_unconfirmed_labels_fall_back_to_the_bare_code), then
+    back down to seven the same day when PI was removed as a confirmed
+    category error. PR (Permit Receiver) must never be a member -- see
     AuthorityRoleType's own docstring -- and neither must RE, which
     this pass deliberately did not add (RTO represents RE/QP
     functionally but RE was never asked to be modeled as its own
     role)."""
     codes = {member.value for member in AuthorityRoleType}
 
-    assert codes == {"PE", "QP", "PI", "PA", "PM", "SA", "QE", "RTO"}
+    assert codes == {"PE", "QP", "PA", "PM", "SA", "QE", "RTO"}
     assert "PR" not in codes
     assert "RE" not in codes
+
+
+def test_pi_is_not_reintroduced_without_grounded_construction_authority_reason():
+    """Guard against silently reintroducing PI (2026-08-14, confirmed
+    category error): "PI" in this codebase's authority-role context
+    named Principal Investigator, an academic research role -- not a
+    construction site gate like PE/QP/PA/PM/SA. This is a different,
+    stronger claim than "unconfirmed" (the PA/PM/SA/QE/RTO posture
+    above): PI wasn't awaiting confirmation, it was confirmed wrong.
+
+    If this assertion ever fails because "PI" was added back to
+    AuthorityRoleType, that addition needs its own fresh, grounded
+    construction-authority justification in a code comment -- not a
+    silent revival of the old (mistaken) member, and not an assumption
+    that this test is simply stale."""
+    codes = {member.value for member in AuthorityRoleType}
+
+    assert "PI" not in codes
 
 
 def test_discipline_has_exactly_the_three_named_examples():

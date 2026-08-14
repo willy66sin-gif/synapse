@@ -125,24 +125,29 @@ def test_real_catch_all_has_no_role_type():
 
 def test_authority_binding_accepts_a_role_type():
     """Schema now supports a typed entry -- not populated in
-    DIRECTORY_MAP yet, but the shape exists for when real PE/QP/PI/PA/
-    PM/SA entries are added (a separate, future task)."""
+    DIRECTORY_MAP yet, but the shape exists for when real PE/QP/PA/PM/
+    SA entries are added (a separate, future task)."""
     binding = AuthorityBinding("BIND-PE-01", "Engineer of Record", "whatsapp:+6591112222", AuthorityRoleType.PE)
 
     assert binding.role_type == AuthorityRoleType.PE
 
 
-def test_authority_role_type_has_exactly_the_eight_confirmed_codes():
+def test_authority_role_type_has_exactly_the_seven_confirmed_codes():
     """PR (Permit Receiver) must never be a member: it names the
     executing worker/crew, the same category as the Frontline Worker
     persona, not an approving/certifying authority. Grown from six to
-    eight (2026-08-14, GC discipline-split / RTO-RE-QP handoff) -- see
-    tests/test_core_roles.py for the fuller version of this guard,
-    including the label-fallback assertions for QE/RTO."""
+    eight (2026-08-14, GC discipline-split / RTO-RE-QP handoff), then
+    back to seven the same day when PI was removed as a confirmed
+    category error (it named an academic research role, not a
+    construction authority) -- see tests/test_core_roles.py for the
+    fuller version of this guard, including the label-fallback
+    assertions for QE/RTO and the dedicated PI-non-reintroduction
+    guard."""
     codes = {member.value for member in AuthorityRoleType}
 
-    assert codes == {"PE", "QP", "PI", "PA", "PM", "SA", "QE", "RTO"}
+    assert codes == {"PE", "QP", "PA", "PM", "SA", "QE", "RTO"}
     assert "PR" not in codes
+    assert "PI" not in codes
 
 
 # --- GC discipline-split / RTO-RE-QP handoff (2026-08-14): schema extension ---

@@ -17,12 +17,22 @@ import it without pulling in anything they don't already depend on.
 
 Grown from six to eight codes (2026-08-14, GC discipline-split /
 RTO-RE-QP handoff): QE and RTO added -- see each member's own comment
-below for why. PI is untouched by this pass and stays exactly as it
-was: no confirmed label, no default, no guess -- same fail-closed
-treatment as ClaimPayload's jurisdiction_code (Airlock rejects a
-missing/invalid jurisdiction_code outright rather than defaulting one
-in; this module does the analogous thing for PI's label by simply
-never supplying one).
+below for why.
+
+PI REMOVED (2026-08-14, confirmed category error): the code was never
+a construction-authority role. "PI" here referred to Principal
+Investigator -- an academic research role -- not a construction site
+gate in the PE/QP/PA/PM/SA/QE/RTO family. Every comment in this repo
+that previously listed PI as "unconfirmed but plausible, same as
+PA/PM/SA" was wrong in a different way than PA/PM/SA are: those three
+are real candidate construction roles awaiting a confirmed label; PI
+was never a construction role in the first place, confirmed wrong
+outright, not merely unconfirmed. Do not reintroduce a "PI" member
+without a real, grounded construction-authority definition backing
+it -- a fresh confirmation, not a reuse of the old academic-context
+code. See tests/test_core_roles.py's
+test_pi_is_not_reintroduced_without_grounded_construction_authority_reason
+for the guard.
 """
 from enum import Enum
 
@@ -39,11 +49,17 @@ class AuthorityRoleType(str, Enum):
     names the executing worker/crew, not an approving or certifying
     role -- the same category as the Frontline Worker persona, not
     this authority set.
+
+    PI is deliberately NOT a member either (removed 2026-08-14 -- see
+    this module's own doc comment): it was a category error, not an
+    unconfirmed-but-plausible code like PA/PM/SA. If a real
+    construction-authority role that happens to abbreviate to "PI"
+    is ever confirmed, it needs its own grounded justification added
+    here, not a silent re-add of this code.
     """
 
     PE = "PE"
     QP = "QP"
-    PI = "PI"
     PA = "PA"
     PM = "PM"
     SA = "SA"
@@ -52,7 +68,7 @@ class AuthorityRoleType(str, Enum):
     # AuthorityBinding.activation in src/maestro/directory.py). Added as
     # its own code, not folded into QP, because it was named as a
     # distinct code in the handoff that requested it -- but what QE
-    # expands to was not stated, so (same posture as PI/PA/PM/SA below)
+    # expands to was not stated, so (same posture as PA/PM/SA below)
     # no expansion is guessed here.
     QE = "QE"
     # RTO (2026-08-14): distinct from QP/PE per the same handoff --
@@ -61,7 +77,7 @@ class AuthorityRoleType(str, Enum):
     # verification). Both of those are the *reason* RTO gets its own
     # code rather than being merged into QP/PE, not a claim about what
     # the letters expand to -- the handoff gave the acronym and its
-    # function, not a spelled-out name, so (same posture as PI/PA/PM/SA/
+    # function, not a spelled-out name, so (same posture as PA/PM/SA/
     # QE) role_type_label() below does not invent one. "RE" is
     # referenced here only as the role RTO stands in for; it is not
     # itself a member of this enum -- nothing in this pass asked for RE
@@ -80,18 +96,20 @@ class AuthorityRoleType(str, Enum):
 # - QP = "Qualified Person": explicitly named as a defined Building
 #   Control Act term in the handoff that introduced this authority
 #   set -- not inferred, stated directly.
-# PI, PA, PM, SA, QE, RTO are deliberately absent. "Safety Assessor"
-# for SA was used as an illustrative example in the Task A instructions
-# that requested this map -- an example is not a confirmed source, and
+# PA, PM, SA, QE, RTO are deliberately absent. "Safety Assessor" for SA
+# was used as an illustrative example in the Task A instructions that
+# requested this map -- an example is not a confirmed source, and
 # nothing in this repo independently verifies it, so it is NOT entered
-# here as fact. Same for any plausible-sounding expansion of PI/PA/PM
-# ("Permit Issuer"/"Permit Approver"/"Project Manager" and similar), or
-# of QE/RTO ("Qualified Engineer"/"Resident Technical Officer" and
-# similar) -- plausible is not confirmed. role_type_label() falls back
-# to the bare code for all six unconfirmed codes (the original four
-# plus QE/RTO), which is what every screen already shows today for the
-# original four -- this map does not regress anything, it only
-# upgrades what's already confidently known.
+# here as fact. Same for any plausible-sounding expansion of PA/PM
+# ("Permit Approver"/"Project Manager" and similar), or of QE/RTO
+# ("Qualified Engineer"/"Resident Technical Officer" and similar) --
+# plausible is not confirmed. role_type_label() falls back to the bare
+# code for all five unconfirmed codes (PA/PM/SA plus QE/RTO), which is
+# what every screen already shows today for PA/PM/SA -- this map does
+# not regress anything, it only upgrades what's already confidently
+# known. (PI is not part of this list at all -- see this module's own
+# doc comment: it wasn't "unconfirmed like these five," it was a
+# confirmed category error, removed outright.)
 ROLE_TYPE_LABELS: dict[AuthorityRoleType, str] = {
     AuthorityRoleType.PE: "Professional Engineer",
     AuthorityRoleType.QP: "Qualified Person",
@@ -102,7 +120,7 @@ def role_type_label(role_type: "AuthorityRoleType | None") -> "str | None":
     """
     Resolves role_type to its confirmed human-readable label, or the
     bare code if no confirmed label exists yet (see ROLE_TYPE_LABELS'
-    own comment for exactly which four codes that applies to today).
+    own comment for exactly which codes that applies to today).
     Returns None only if role_type itself is None -- callers with an
     untyped AuthorityBinding (role_type=None, e.g. the "General Duty
     Officer" catch-all) should use AuthorityBinding.role directly
@@ -121,7 +139,7 @@ class Discipline(str, Enum):
     discipline -- one contact per discipline, not one person covering
     everything -- so a binding needs a discipline dimension distinct
     from its role_type. role_type answers "what kind of authority is
-    this" (PE/QP/PI/PA/PM/SA/QE/RTO); discipline answers "which
+    this" (PE/QP/PA/PM/SA/QE/RTO); discipline answers "which
     vertical of the work does this particular binding cover."
 
     CIVIL/STRUCTURAL/ELECTRICAL are the three disciplines named in the
