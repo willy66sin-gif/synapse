@@ -14,7 +14,8 @@ discipline as src/core/rules.py and src/supervisor/logic.py.
 Schema restructuring (2026-08-05, Supervisor Override Retirement --
 see CLAUDE.md): AuthorityBinding gained role_type, an optional
 AuthorityRoleType drawn from the licensed/registered authority set
-(PE/QP/PI/PA/PM/SA) that replaces override as the only way a verdict
+(PE/QP/PI/PA/PM/SA at the time -- see src/core/roles.py for the two
+codes added since) that replaces override as the only way a verdict
 can change -- a fresh, re-adjudicated claim from the specific role
 that owns the gate, not a generic label. This is schema/structure
 only, per this pass's explicit scope: no real PEB/MOM registration
@@ -30,14 +31,86 @@ exactly what is and isn't routed, and why.
 
 Relocated (2026-08-06): AuthorityRoleType itself now lives in
 src/core/roles.py, re-exported here for backward compatibility (same
-enum, same six members, no behavior change) -- src/core/models.py's
-new IssuerRole needed it too, and Core must not depend on Maestro to
-get it (see src/core/roles.py's own doc comment for the full reasoning).
+enum, no behavior change) -- src/core/models.py's new IssuerRole
+needed it too, and Core must not depend on Maestro to get it (see
+src/core/roles.py's own doc comment for the full reasoning). Discipline
+lives there too, for the identical reason, and is likewise re-exported
+here.
+
+Schema extension (2026-08-14, GC discipline-split / RTO-RE-QP
+handoff) -- three additions, schema/structure only, same discipline as
+the 2026-08-05 role_type restructuring above: no real PEB/IES/ACES
+registration data is populated, DIRECTORY_MAP still ships with only
+the untyped ("*", "*") catch-all plus the one confirmed R-ZONE-01
+routing entry, and none of the three additions below are wired into
+resolve_authority()'s lookup key or precedence logic -- that stays
+(zone_id, reason_code) exactly as it was. Wiring any of them into live
+lookup logic is a separate, not-yet-decided task, same posture
+role_type itself took for a full cycle before check_authority() ever
+read it.
+
+1. discipline (Optional[Discipline], default None): a GC's execution
+   teams split by discipline, not one person covering everything -- a
+   binding now records which vertical (civil/structural/electrical/
+   etc. -- see src/core/roles.py's Discipline) it covers, independent
+   of its role_type. Not part of the DIRECTORY_MAP lookup key: adding a
+   fourth lookup dimension is exactly the kind of live-logic redesign
+   this pass is scoped to avoid, not a data-shape decision this pass
+   should make unilaterally.
+
+2. activation / activation_trigger (ActivationMode, default
+   CONTINUOUS; Optional[str], default None): most bindings (the
+   existing catch-all, R-ZONE-01's SA entry) represent continuous
+   on-site presence -- unchanged, hence the CONTINUOUS default so
+   existing bindings need no edit. QP and QE are different: dormant by
+   default, reactivating only on a design-alteration trigger, not
+   continuously present the way RTO (see below) or SA are.
+   activation_trigger is a bare optional string, not a structured
+   trigger-condition model -- no taxonomy of trigger types has been
+   confirmed yet (same "bare field until a real shape is confirmed"
+   posture as src/doctrine/models.py's citations column), so this
+   holds a freeform description (e.g. "design_alteration") once a real
+   dormant binding is added, not before.
+
+3. RTO as a role_type (see src/core/roles.py's AuthorityRoleType.RTO):
+   externally verifiable via IES/ACES rather than PEB, distinct from
+   QP/PE, and -- per activation/activation_trigger above -- typically
+   CONTINUOUS where QP/QE are typically TRIGGERED, since RTO functions
+   as RE/QP's continuous on-site representative. That relationship
+   ("RTO stands in for RE/QP on site") is documented here and on
+   AuthorityRoleType.RTO's own comment, not encoded as a structural
+   field: no confirmed shape for "represents another role" has been
+   requested, and RE is not itself a modeled role (see
+   AuthorityRoleType.RTO's comment for why).
+
+PI is untouched by this pass. Same fail-closed treatment as
+ClaimPayload's jurisdiction_code: required wherever a role_type is
+PI, no default value, no guessed label -- see src/core/roles.py's own
+comment for where that's enforced (by omission from ROLE_TYPE_LABELS).
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
-from src.core.roles import AuthorityRoleType, role_type_label  # noqa: F401 - AuthorityRoleType re-exported for backward compatibility
+from src.core.roles import AuthorityRoleType, Discipline, role_type_label  # noqa: F401 - AuthorityRoleType/Discipline re-exported for backward compatibility
+
+
+class ActivationMode(str, Enum):
+    """
+    Whether an AuthorityBinding represents continuous on-site presence
+    or a dormant role that only activates on a specific trigger
+    (2026-08-14, GC discipline-split / RTO-RE-QP handoff).
+
+    CONTINUOUS is the default for every binding shipped today (the
+    catch-all, R-ZONE-01's SA entry) -- unchanged behavior, no edit
+    needed on existing entries. TRIGGERED describes QP/QE's dormant-
+    by-default / design-alteration-reactivation behavior; see
+    AuthorityBinding.activation_trigger for the (freeform, unpopulated)
+    slot that would eventually describe what the trigger is.
+    """
+
+    CONTINUOUS = "CONTINUOUS"
+    TRIGGERED = "TRIGGERED"
 
 
 @dataclass(frozen=True)
@@ -46,6 +119,9 @@ class AuthorityBinding:
     role: str
     contact_id: Optional[str] = None
     role_type: Optional[AuthorityRoleType] = None
+    discipline: Optional[Discipline] = None
+    activation: ActivationMode = field(default=ActivationMode.CONTINUOUS)
+    activation_trigger: Optional[str] = None
 
 
 # Deprecated (2026-08-05, Supervisor Override Retirement): no longer
@@ -101,9 +177,10 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 # Starts with two entries: the untyped catch-all default, and the one
 # confirmed reason_code routing above. role_type intentionally left
 # None on the catch-all -- "General Duty Officer" is not one of the
-# licensed PE/QP/PI/PA/PM/SA roles. Real (zone_id, reason_code) entries
-# -- and real contact_id values -- get added here as actual site
-# authorities are identified and bound to real registrations.
+# licensed PE/QP/PI/PA/PM/SA/QE/RTO roles. Real (zone_id, reason_code)
+# entries -- and real contact_id/discipline/activation values -- get
+# added here as actual site authorities are identified and bound to
+# real registrations.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
