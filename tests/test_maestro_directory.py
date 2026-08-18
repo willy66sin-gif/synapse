@@ -1,12 +1,17 @@
 """
 src/maestro/directory.py: resolve_authority() precedence tests.
 
-The real DIRECTORY_MAP ships with exactly one entry (the ("*", "*")
-catch-all) -- see directory.py's own comment on why. To actually
-exercise the three-tier precedence order (specific zone+reason beats
-global reason-code default beats catch-all), these tests monkeypatch
-DIRECTORY_MAP with a small multi-entry map local to each test, rather
-than seeding the shipped module with fabricated data.
+resolve_authority() returns a list, not a single AuthorityBinding
+(2026-08-18) -- the reason_code tier's single winner (most-specific
+(zone_id, reason_code) match, then ("*", reason_code), then the
+("*", "*") catch-all) comes first, followed by QP/QE's two bindings if
+is_design_alteration=True. The two dimensions are orthogonal: both can
+be true for the same claim at once.
+
+To actually exercise the three-tier reason_code precedence order,
+several tests monkeypatch DIRECTORY_MAP with a small multi-entry map
+local to each test, rather than seeding the shipped module with
+fabricated data.
 """
 import pytest
 
@@ -34,26 +39,26 @@ def multi_entry_directory(monkeypatch):
 def test_specific_zone_and_reason_match_wins_over_broader_entries(multi_entry_directory):
     result = resolve_authority("ZONE_A", "R-PTW-01")
 
-    assert result == SPECIFIC
+    assert result == [SPECIFIC]
 
 
 def test_global_reason_default_used_when_zone_has_no_specific_entry(multi_entry_directory):
     result = resolve_authority("ZONE_B", "R-PTW-01")
 
-    assert result == REASON_DEFAULT
+    assert result == [REASON_DEFAULT]
 
 
 def test_catch_all_used_when_neither_zone_nor_reason_has_an_entry(multi_entry_directory):
     result = resolve_authority("ZONE_B", "R-AUTH-01")
 
-    assert result == CATCH_ALL
+    assert result == [CATCH_ALL]
 
 
 def test_catch_all_used_when_reason_code_is_none(multi_entry_directory):
     """GO verdicts carry reason_code=None -- must still resolve, not raise."""
     result = resolve_authority("ZONE_A", None)
 
-    assert result == CATCH_ALL
+    assert result == [CATCH_ALL]
 
 
 def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(multi_entry_directory):
@@ -62,9 +67,9 @@ def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(
     specific one must win, not the broadest or an arbitrary one."""
     result = resolve_authority("ZONE_A", "R-PTW-01")
 
-    assert result.binding_id == "BIND-001"
-    assert result != REASON_DEFAULT
-    assert result != CATCH_ALL
+    assert result == [SPECIFIC]
+    assert result[0].binding_id == "BIND-001"
+    assert SPECIFIC not in (REASON_DEFAULT, CATCH_ALL)
 
 
 def test_real_directory_map_resolves_via_catch_all_for_a_genuinely_unrouted_reason_code():
@@ -77,13 +82,15 @@ def test_real_directory_map_resolves_via_catch_all_for_a_genuinely_unrouted_reas
     is untouched and still required to exist: this exercises it via a
     synthetic reason_code no real Verdict ever produces, confirming
     fallback behavior still works for whatever is NOT explicitly named
-    in DIRECTORY_MAP."""
+    in DIRECTORY_MAP. is_design_alteration defaults to False, so the
+    result is still a single-element list."""
     result = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
 
-    assert result.binding_id == "BIND-999"
-    assert result.role == "General Duty Officer"
-    assert result.contact_id is None
-    assert result.role_type is None
+    assert len(result) == 1
+    assert result[0].binding_id == "BIND-999"
+    assert result[0].role == "General Duty Officer"
+    assert result[0].contact_id is None
+    assert result[0].role_type is None
 
 
 def test_real_directory_map_routes_all_five_confirmed_reason_codes_to_rto():
@@ -104,9 +111,10 @@ def test_real_directory_map_routes_all_five_confirmed_reason_codes_to_rto():
         ("ZONE-01", "R-AUTH-03"),
     ]:
         result = resolve_authority(zone_id, reason_code)
-        assert result.binding_id == "BIND-RTO-01"
-        assert result.role == "RTO"
-        assert result.role_type == AuthorityRoleType.RTO
+        assert len(result) == 1
+        assert result[0].binding_id == "BIND-RTO-01"
+        assert result[0].role == "RTO"
+        assert result[0].role_type == AuthorityRoleType.RTO
 
 
 def test_real_directory_map_routes_r_zone_01_to_sa():
@@ -117,9 +125,10 @@ def test_real_directory_map_routes_r_zone_01_to_sa():
     reason_code) entry is seeded either."""
     for zone_id in ("ZONE-01", "ZONE-99", None):
         result = resolve_authority(zone_id, "R-ZONE-01")
-        assert result.binding_id == "BIND-SA-01"
-        assert result.role == "SA"
-        assert result.role_type == AuthorityRoleType.SA
+        assert len(result) == 1
+        assert result[0].binding_id == "BIND-SA-01"
+        assert result[0].role == "SA"
+        assert result[0].role_type == AuthorityRoleType.SA
 
 
 def test_resolve_authority_raises_if_catch_all_missing(monkeypatch):
@@ -143,7 +152,7 @@ def test_real_catch_all_has_no_role_type():
     routes to RTO, see the routing-expansion tests above)."""
     result = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
 
-    assert result.role_type is None
+    assert result[0].role_type is None
 
 
 def test_authority_binding_accepts_a_role_type():
@@ -204,8 +213,8 @@ def test_authority_binding_accepts_a_discipline():
 
 def test_authority_binding_accepts_a_triggered_activation_with_a_trigger_description():
     """Schema now supports dormant-by-default / reactivation-on-trigger
-    roles (QP/QE's real behavior) -- not populated in DIRECTORY_MAP
-    yet, but the shape exists."""
+    roles -- this is exactly QP/QE's real, live shape as of 2026-08-18
+    (see the routing-expansion tests below)."""
     binding = AuthorityBinding(
         "BIND-QP-01",
         "Qualified Person",
@@ -219,15 +228,15 @@ def test_authority_binding_accepts_a_triggered_activation_with_a_trigger_descrip
 
 
 def test_real_directory_map_bindings_are_still_continuous_with_no_discipline():
-    """Regression guard against this pass's own scope: the real,
-    shipped DIRECTORY_MAP must not have gained fabricated discipline/
-    activation data as a side effect of adding the fields. Checks the
+    """Regression guard against this pass's own scope: the reason_code
+    tier's real, shipped bindings must not have gained fabricated
+    discipline data as a side effect of adding the field. Checks the
     true catch-all (via a synthetic, never-real reason_code -- R-PTW-01
-    no longer reaches it as of 2026-08-18, see the routing-expansion
-    tests above), R-ZONE-01's SA binding, and R-PTW-01's RTO binding."""
-    catch_all = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
-    zone_safety = resolve_authority("ZONE-01", "R-ZONE-01")
-    ptw_authority = resolve_authority("ZONE-01", "R-PTW-01")
+    no longer reaches it as of 2026-08-18), R-ZONE-01's SA binding, and
+    R-PTW-01's RTO binding -- all CONTINUOUS, unlike QP/QE (see below)."""
+    catch_all = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")[0]
+    zone_safety = resolve_authority("ZONE-01", "R-ZONE-01")[0]
+    ptw_authority = resolve_authority("ZONE-01", "R-PTW-01")[0]
 
     for binding in (catch_all, zone_safety, ptw_authority):
         assert binding.discipline is None
@@ -235,18 +244,14 @@ def test_real_directory_map_bindings_are_still_continuous_with_no_discipline():
         assert binding.activation_trigger is None
 
 
-# --- Routing expansion (2026-08-18): RTO default, QP/QE structural-only, PM/PA unrouted ---
+# --- Routing expansion (2026-08-18): RTO live default, QP/QE live design-alteration routing, PM/PA unrouted ---
 
 
-
-
-def test_qp_qe_routing_does_not_fire_for_any_real_reason_code():
+def test_qp_qe_do_not_appear_when_is_design_alteration_is_false():
     """No real Verdict.reason_code (R-PTW-01, R-AUTH-01/02/03, R-ZONE-01,
-    or GO's None) ever resolves to QP or QE -- there is no live
-    design-alteration signal anywhere in this codebase yet (no
-    ClaimPayload field, no resolve_authority() parameter), so QP/QE must
-    never fire for ordinary traffic. This is the "does NOT fire without
-    a design-alteration flag" half of the requirement."""
+    or GO's None), combined with is_design_alteration left at its
+    default (False), ever includes QP or QE in the result -- this is
+    the "does NOT fire without the flag" half of the requirement."""
     for zone_id, reason_code in [
         ("ZONE-01", "R-PTW-01"),
         ("ZONE-99", "R-AUTH-01"),
@@ -255,29 +260,73 @@ def test_qp_qe_routing_does_not_fire_for_any_real_reason_code():
         ("ZONE-01", "R-ZONE-01"),
         ("ZONE-01", None),
     ]:
-        result = resolve_authority(zone_id, reason_code)
-        assert result.role_type not in (AuthorityRoleType.QP, AuthorityRoleType.QE)
+        result = resolve_authority(zone_id, reason_code, is_design_alteration=False)
+        role_types = {binding.role_type for binding in result}
+        assert AuthorityRoleType.QP not in role_types
+        assert AuthorityRoleType.QE not in role_types
+        assert len(result) == 1
 
 
-def test_qp_qe_routing_fires_only_via_its_own_placeholder_trigger_key():
-    """The other half of the requirement: QP/QE routing DOES fire, but
-    only for the dedicated placeholder key that stands in for a real
-    design-alteration flag -- no live ClaimPayload field or
-    resolve_authority() parameter carries that signal yet (see
-    directory.py's 2026-08-18 comment), so this exercises the entries'
-    reachability through the existing (zone_id, reason_code) mechanism
-    directly, not a live conditional dispatch from real claim data."""
-    qp_result = resolve_authority("*", "DESIGN_ALTERATION_QP")
-    assert qp_result.binding_id == "BIND-QP-DA-01"
-    assert qp_result.role_type == AuthorityRoleType.QP
-    assert qp_result.activation == ActivationMode.TRIGGERED
-    assert qp_result.activation_trigger == "design_alteration"
+def test_qp_qe_both_appear_when_is_design_alteration_is_true():
+    """The other half of the requirement: is_design_alteration=True
+    always appends BOTH QP and QE (2026-08-18, explicit confirmation --
+    nothing in this repo distinguishes a "QP-type" from a "QE-type"
+    alteration, so both fire together), regardless of reason_code --
+    orthogonal dimensions, confirmed explicitly to both be able to
+    apply at once."""
+    for zone_id, reason_code in [
+        ("ZONE-01", "R-PTW-01"),
+        ("ZONE-99", "R-AUTH-01"),
+        ("ZONE-01", "R-ZONE-01"),
+        ("ZONE-01", None),
+    ]:
+        result = resolve_authority(zone_id, reason_code, is_design_alteration=True)
+        role_types = [binding.role_type for binding in result]
+        assert AuthorityRoleType.QP in role_types
+        assert AuthorityRoleType.QE in role_types
+        assert len(result) == 3
 
-    qe_result = resolve_authority("*", "DESIGN_ALTERATION_QE")
-    assert qe_result.binding_id == "BIND-QE-DA-01"
-    assert qe_result.role_type == AuthorityRoleType.QE
-    assert qe_result.activation == ActivationMode.TRIGGERED
-    assert qe_result.activation_trigger == "design_alteration"
+
+def test_reason_code_and_design_alteration_bindings_coexist_in_order():
+    """The reason_code-tier binding always comes first, QP then QE
+    after -- e.g. a GO claim that's also a design alteration resolves
+    to [RTO, QP-binding, QE-binding], not one or the other (explicit
+    instruction: the two dimensions are orthogonal, both can be true at
+    once)."""
+    result = resolve_authority("ZONE-01", None, is_design_alteration=True)
+
+    assert [binding.binding_id for binding in result] == ["BIND-RTO-01", "BIND-QP-DA-01", "BIND-QE-DA-01"]
+    assert [binding.role_type for binding in result] == [
+        AuthorityRoleType.RTO,
+        AuthorityRoleType.QP,
+        AuthorityRoleType.QE,
+    ]
+
+
+def test_qp_qe_bindings_are_triggered_not_continuous():
+    """QP/QE's real, live shape: TRIGGERED activation with a
+    "design_alteration" trigger description, distinct from every
+    reason_code-tier binding (all CONTINUOUS, see the regression guard
+    above)."""
+    result = resolve_authority("ZONE-01", None, is_design_alteration=True)
+    qp_binding = next(binding for binding in result if binding.role_type == AuthorityRoleType.QP)
+    qe_binding = next(binding for binding in result if binding.role_type == AuthorityRoleType.QE)
+
+    for binding in (qp_binding, qe_binding):
+        assert binding.activation == ActivationMode.TRIGGERED
+        assert binding.activation_trigger == "design_alteration"
+
+
+def test_qp_qe_are_not_reachable_via_any_directory_map_key():
+    """As of 2026-08-18, QP/QE are a separate lookup dimension
+    (is_design_alteration), not a (zone_id, reason_code) key -- the old
+    placeholder keys ("DESIGN_ALTERATION_QP"/"_QE") are gone from
+    DIRECTORY_MAP entirely, and no role_type in the map itself is ever
+    QP or QE."""
+    role_types_in_map = {binding.role_type for binding in directory.DIRECTORY_MAP.values()}
+
+    assert AuthorityRoleType.QP not in role_types_in_map
+    assert AuthorityRoleType.QE not in role_types_in_map
 
 
 def test_pm_and_pa_have_no_directory_entries():
@@ -286,7 +335,9 @@ def test_pm_and_pa_have_no_directory_entries():
     rather than routing independently. PA: per-project liability
     assignment is still unconfirmed (see CLAUDE.md's Open Items).
     Neither role_type appears on any binding anywhere in the real,
-    shipped DIRECTORY_MAP."""
+    shipped DIRECTORY_MAP (which no longer contains QP/QE either, per
+    the test above -- this checks PM/PA specifically, not "anything
+    beyond the reason_code tier")."""
     role_types_in_use = {binding.role_type for binding in directory.DIRECTORY_MAP.values()}
 
     assert AuthorityRoleType.PM not in role_types_in_use

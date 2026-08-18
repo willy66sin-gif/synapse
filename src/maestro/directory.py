@@ -202,22 +202,23 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 #    left unrouted today, but the catch-all still guards against a
 #    future, not-yet-named one).
 #
-# 2. QP/QE stay TRIGGERED, not CONTINUOUS -- structural entries only,
-#    same "ship the shape, not fabricated behavior" discipline as
-#    discipline/activation themselves (2026-08-14, still unwired into
-#    resolve_authority()'s lookup key or precedence logic). There is no
-#    ClaimPayload field carrying a design-alteration signal today and
-#    no resolve_authority() parameter to read one -- adding either is a
-#    real schema/signature change, explicitly out of scope this pass.
-#    _DESIGN_ALTERATION_QP_AUTHORITY / _DESIGN_ALTERATION_QE_AUTHORITY
-#    below are inserted under placeholder keys that no real
-#    Verdict.reason_code value will ever produce (Core's rule set never
-#    emits "DESIGN_ALTERATION_QP"/"DESIGN_ALTERATION_QE" as a
-#    reason_code) -- present for future wiring, inert against all live
-#    traffic today. Do not wire a live design-alteration check by
-#    reusing these keys as a shortcut; that's the separate,
-#    not-yet-decided task this comment (and the 2026-08-14 one above
-#    it) already flags.
+# 2. QP/QE are now LIVE (2026-08-18) -- previously structural-only,
+#    unwired placeholder entries (2026-08-14). ClaimPayload gained
+#    is_design_alteration/alteration_description (src/airlock/schemas.py)
+#    and resolve_authority() gained a matching is_design_alteration
+#    parameter -- when True, BOTH _DESIGN_ALTERATION_QP_AUTHORITY and
+#    _DESIGN_ALTERATION_QE_AUTHORITY are returned, alongside whatever
+#    the reason_code tier resolved (point 1 above; explicit instruction:
+#    the two dimensions are orthogonal and both can be true at once --
+#    e.g. a GO claim that's also a design alteration returns [RTO, QP,
+#    QE], not one or the other). Nothing in this repo distinguishes a
+#    "QP-type" from a "QE-type" alteration, so both fire together
+#    rather than picking one -- confirmed, not guessed. They are no
+#    longer reachable via any (zone_id, reason_code) DIRECTORY_MAP key
+#    (the old "DESIGN_ALTERATION_QP"/"_QE" placeholder keys are removed
+#    below -- resolve_authority() now references the two constants
+#    directly), since is_design_alteration is a genuinely separate
+#    lookup dimension, not a fake reason_code anymore.
 #
 # 3. PM and PA remain unrouted -- deliberately no AuthorityBinding
 #    entry for either, for two different reasons, neither a placeholder
@@ -276,9 +277,11 @@ _DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
 # RTO is now the live target for five entries -- reason_code=None (GO)
 # and R-PTW-01/R-AUTH-01/R-AUTH-02/R-AUTH-03 -- confirmed directly, not
 # speculative. R-ZONE-01 keeps its own separate, earlier-confirmed
-# routing to SA, untouched. QP/QE's two placeholder-keyed,
-# structurally-TRIGGERED entries (point 2 above) are unaffected by this
-# expansion. PM and PA remain absent entirely, per point 3 above.
+# routing to SA, untouched. PM and PA remain absent entirely, per point
+# 3 above. QP/QE are NOT in this map at all (as of 2026-08-18, point 2
+# above) -- they're a separate lookup dimension now
+# (is_design_alteration), resolved directly by resolve_authority()
+# below, not through a (zone_id, reason_code) key.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
@@ -287,14 +290,23 @@ DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "R-AUTH-01"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "R-AUTH-02"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "R-AUTH-03"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
-    ("*", "DESIGN_ALTERATION_QP"): _DESIGN_ALTERATION_QP_AUTHORITY,
-    ("*", "DESIGN_ALTERATION_QE"): _DESIGN_ALTERATION_QE_AUTHORITY,
 }
 
 
-def resolve_authority(zone_id: Optional[str], reason_code: Optional[str]) -> AuthorityBinding:
+def resolve_authority(
+    zone_id: Optional[str], reason_code: Optional[str], is_design_alteration: bool = False
+) -> list[AuthorityBinding]:
     """
-    Precedence, most to least specific:
+    Returns every AuthorityBinding applicable to this claim, in a fixed
+    order: the reason_code-based binding first, then (if
+    is_design_alteration) QP and QE. The two dimensions are orthogonal
+    and both can be true at once (2026-08-18, explicit instruction) --
+    a GO claim that's also a design alteration returns
+    [RTO, QP-binding, QE-binding], not one or the other. The list is
+    never empty: the reason_code tier always resolves to at least the
+    catch-all.
+
+    reason_code tier precedence, most to least specific:
       1. (zone_id, reason_code)  -- specific match
       2. ("*", reason_code)      -- global reason-code default
       3. ("*", "*")               -- catch-all system default
@@ -303,11 +315,21 @@ def resolve_authority(zone_id: Optional[str], reason_code: Optional[str]) -> Aut
     fails closed (raises) rather than returning an unresolved binding
     if it's ever missing, instead of silently falling through to None.
     """
+    reason_code_binding = None
     for key in ((zone_id, reason_code), ("*", reason_code), ("*", "*")):
-        binding = DIRECTORY_MAP.get(key)
-        if binding is not None:
-            return binding
+        candidate = DIRECTORY_MAP.get(key)
+        if candidate is not None:
+            reason_code_binding = candidate
+            break
 
-    raise KeyError(
-        "No AuthorityBinding matched, not even the ('*', '*') catch-all -- DIRECTORY_MAP is misconfigured."
-    )
+    if reason_code_binding is None:
+        raise KeyError(
+            "No AuthorityBinding matched, not even the ('*', '*') catch-all -- DIRECTORY_MAP is misconfigured."
+        )
+
+    bindings = [reason_code_binding]
+    if is_design_alteration:
+        bindings.append(_DESIGN_ALTERATION_QP_AUTHORITY)
+        bindings.append(_DESIGN_ALTERATION_QE_AUTHORITY)
+
+    return bindings

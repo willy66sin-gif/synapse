@@ -138,8 +138,10 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-PTW-01"
-    # R-PTW-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
-    assert response.json()["authority_binding_id"] == "BIND-RTO-01"
+    # R-PTW-01 resolves to RTO (2026-08-18, direct confirmation) -- see
+    # DIRECTORY_MAP. List-valued (2026-08-18): no is_design_alteration
+    # on this claim, so just the one reason_code binding.
+    assert response.json()["authority_binding_id"] == ["BIND-RTO-01"]
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
@@ -147,8 +149,8 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
         assert alert.reason_code == "R-PTW-01"
         assert alert.conflicting_condition is not None
         assert alert.conflicting_condition.rule_id == "ptw_precondition_check"
-        assert alert.authority_binding_id == "BIND-RTO-01"
-        assert alert.assigned_role == "RTO"
+        assert alert.authority_binding_id == ["BIND-RTO-01"]
+        assert alert.assigned_role == ["RTO"]
 
 
 def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -160,14 +162,14 @@ def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-AUTH-01"
     # R-AUTH-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
-    assert response.json()["authority_binding_id"] == "BIND-RTO-01"
+    assert response.json()["authority_binding_id"] == ["BIND-RTO-01"]
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-AUTH-01"
         assert alert.conflicting_condition.rule_id == "authority_check"
-        assert alert.authority_binding_id == "BIND-RTO-01"
-        assert alert.assigned_role == "RTO"
+        assert alert.authority_binding_id == ["BIND-RTO-01"]
+        assert alert.assigned_role == ["RTO"]
 
 
 def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -181,14 +183,14 @@ def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-ZONE-01"
-    assert response.json()["authority_binding_id"] == "BIND-SA-01"
+    assert response.json()["authority_binding_id"] == ["BIND-SA-01"]
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-ZONE-01"
         assert alert.conflicting_condition.rule_id == "zone_safety_check"
-        assert alert.authority_binding_id == "BIND-SA-01"
-        assert alert.assigned_role == "SA"
+        assert alert.authority_binding_id == ["BIND-SA-01"]
+        assert alert.assigned_role == ["SA"]
 
 
 def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
@@ -207,3 +209,58 @@ def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
         # Supervisor Override Retirement (5 Aug 2026): escalation_contact states the
         # resolved authority directly, not an override URL -- see src/maestro/schemas.py.
         assert alert.escalation_contact == "RTO (BIND-RTO-01)"
+
+
+# --- Design-alteration self-declaration (2026-08-18): end-to-end routing ---
+
+
+def test_no_go_design_alteration_routes_to_rto_and_both_qp_and_qe(maestro_calls):
+    """The two dimensions are orthogonal, confirmed explicitly to both
+    apply at once: a NO_GO claim (R-AUTH-01 -> RTO) that's also a
+    design alteration (-> QP and QE) resolves to all three, in that
+    order, both in the persisted evidence and in the Maestro alert."""
+    client = _client_with_stubs(issuer_row=None, zone_data=VALID_LOW_HAZARD_ZONE)
+
+    response = client.post(
+        "/airlock/claims",
+        json=_claim(
+            claim_id="CLM-AUTH-DA-201",
+            is_design_alteration=True,
+            alteration_description="Beam relocated 300mm to clear new duct routing.",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "NO_GO"
+    assert response.json()["reason_code"] == "R-AUTH-01"
+    assert response.json()["authority_binding_id"] == ["BIND-RTO-01", "BIND-QP-DA-01", "BIND-QE-DA-01"]
+
+    assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
+    for _, alert in maestro_calls:
+        assert alert.authority_binding_id == ["BIND-RTO-01", "BIND-QP-DA-01", "BIND-QE-DA-01"]
+        assert alert.assigned_role == ["RTO", "Qualified Person", "QE"]
+
+
+def test_go_design_alteration_still_triggers_no_maestro_call(maestro_calls):
+    """A GO claim that's also a design alteration still triggers zero
+    Maestro alerts -- the locked NO_GO Notification Principle
+    (CLAUDE.md) is untouched by this pass; design-alteration escalation
+    is visible live via the Frontline/Supervisor screens instead (see
+    src/frontline/router.py, src/supervisor/router.py). The persisted
+    authority_binding_id also stays None on GO, unchanged from before
+    this pass -- see src/airlock/router.py's own comment for why."""
+    client = _client_with_stubs(issuer_row=SUPERINTENDENT_ROW, zone_data=VALID_LOW_HAZARD_ZONE)
+
+    response = client.post(
+        "/airlock/claims",
+        json=_claim(
+            claim_id="CLM-GO-DA-201",
+            is_design_alteration=True,
+            alteration_description="Beam relocated 300mm to clear new duct routing.",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "GO"
+    assert response.json()["authority_binding_id"] is None
+    assert maestro_calls == []

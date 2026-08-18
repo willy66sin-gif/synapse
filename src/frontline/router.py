@@ -52,7 +52,14 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
         raise HTTPException(status_code=404, detail=f"No adjudication record found for claim '{claim_id}'.")
 
     zone_id = evidence.get("input_payload", {}).get("zone_id")
-    binding = resolve_authority(zone_id, evidence["reason_code"])
+    is_design_alteration = evidence.get("input_payload", {}).get("is_design_alteration", False)
+    # 2026-08-18: resolve_authority() now returns every applicable
+    # binding (reason_code tier, plus QP/QE if is_design_alteration) --
+    # joined into single display strings here since frontline-screen.js
+    # renders traceId/assignedRole as scalars (unchanged, out of this
+    # pass's scope) -- see resolve_authority()'s own docstring for why
+    # both can apply to the same claim.
+    bindings = resolve_authority(zone_id, evidence["reason_code"], is_design_alteration)
 
     frontline_screen_data = {
         "claimId": evidence["claim_id"],
@@ -60,8 +67,8 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
         "reasonCode": evidence["reason_code"],
         "reason": _frontline_reason(evidence),
         "workActivity": evidence.get("input_payload", {}).get("action_type", ""),
-        "traceId": binding.binding_id,
-        "assignedRole": binding.role,
+        "traceId": ", ".join(binding.binding_id for binding in bindings),
+        "assignedRole": ", ".join(binding.role for binding in bindings),
     }
 
     return HTMLResponse(_render_frontline_screen_page(frontline_screen_data))

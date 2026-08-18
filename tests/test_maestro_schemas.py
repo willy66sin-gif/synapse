@@ -134,8 +134,10 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     # GO (reason_code=None) resolves to RTO (2026-08-18, direct
     # confirmation) -- see src/maestro/directory.py's DIRECTORY_MAP (the
     # Escalation Requirement still applies regardless of decision).
-    assert alert.authority_binding_id == "BIND-RTO-01"
-    assert alert.assigned_role == "RTO"
+    # List-valued as of 2026-08-18 -- no is_design_alteration on this
+    # minimal claim_payload dict, so just the one reason_code binding.
+    assert alert.authority_binding_id == ["BIND-RTO-01"]
+    assert alert.assigned_role == ["RTO"]
     assert alert.recipient_id == "RTO"  # no contact_id on file yet
     # Supervisor Override Retirement (5 Aug 2026): states the resolved authority
     # directly, not an override URL -- see OutboundAlert.from_evidence_record().
@@ -160,8 +162,8 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
     assert alert.conflicting_condition is not None
     assert "Safety Violation" in alert.conflicting_condition.reason
     assert alert.reason_code == "R-ZONE-01"
-    assert alert.authority_binding_id == "BIND-SA-01"
-    assert alert.assigned_role == "SA"
+    assert alert.authority_binding_id == ["BIND-SA-01"]
+    assert alert.assigned_role == ["SA"]
 
 
 def test_from_evidence_record_carries_eptw_reason_code_through():
@@ -188,7 +190,7 @@ def test_from_evidence_record_carries_eptw_reason_code_through():
     assert alert.reason_code == "R-PTW-01"
     assert evidence["reason_code"] == "R-PTW-01"
     # R-PTW-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
-    assert alert.authority_binding_id == "BIND-RTO-01"
+    assert alert.authority_binding_id == ["BIND-RTO-01"]
 
 
 def test_outbound_alert_accepts_reason_code_directly():

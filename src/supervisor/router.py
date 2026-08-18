@@ -101,7 +101,18 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
         )
 
     zone_id = evidence.get("input_payload", {}).get("zone_id")
-    binding = resolve_authority(zone_id, evidence["reason_code"])
+    is_design_alteration = evidence.get("input_payload", {}).get("is_design_alteration", False)
+    # 2026-08-18: resolve_authority() now returns every applicable
+    # binding (reason_code tier, plus QP/QE if is_design_alteration) --
+    # joined into a single display string here since blocked-screen.js
+    # renders assignedRole as a scalar (unchanged, out of this pass's
+    # scope). evidence["authority_binding_id"] below is the raw,
+    # persisted value from src/evidence/emitter.py (list-valued as of
+    # 2026-08-18 too) rendered verbatim, not re-joined -- it was never
+    # this route's live-resolved value to begin with (see the existing
+    # comment on frontend/README.md), so it stays whatever shape
+    # emit_evidence() actually persisted.
+    bindings = resolve_authority(zone_id, evidence["reason_code"], is_design_alteration)
 
     blocked_screen_data = {
         "evidence": {
@@ -113,7 +124,7 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
             "rule_trace": evidence["rule_trace"],
             "evaluated_at": evidence["evaluated_at"],
         },
-        "assignedRole": binding.role,
+        "assignedRole": ", ".join(binding.role for binding in bindings),
         "escalationContact": "Your site supervisor",
         "issuerId": evidence.get("input_payload", {}).get("issuer_id", ""),
         "overrideEndpoint": "/supervisor/override",

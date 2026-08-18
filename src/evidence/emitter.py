@@ -15,15 +15,18 @@ full human-readable message. Storage backend (Postgres write, file,
 etc.) is not wired up here — this function only produces the signed
 record; persisting it is a caller concern.
 
-authority_binding_id (2026-07-31, Escalation Ownership Principle) is
-the resolved src/maestro/directory.py AuthorityBinding.binding_id for
-this claim's escalation owner, None on GO. It's a plain optional
-string parameter, not an import from src.maestro — Evidence stays
-decoupled from Maestro exactly as it already stays decoupled from
-src.supervisor, same "pass plain data, not types" pattern
-emit_override_evidence() already uses. The caller (src/airlock/router.py)
-resolves it before calling this function, since it must be part of the
-signed record, not appended after signing.
+authority_binding_id (2026-07-31, Escalation Ownership Principle;
+list-valued as of 2026-08-18) is the resolved
+src/maestro/directory.py AuthorityBinding.binding_id list for this
+claim's escalation owner(s) — one entry from the reason_code tier,
+plus QP/QE's two if the claim is a design alteration — None on GO. A
+plain optional list-of-strings parameter, not an import from
+src.maestro — Evidence stays decoupled from Maestro exactly as it
+already stays decoupled from src.supervisor, same "pass plain data,
+not types" pattern emit_override_evidence() already uses. The caller
+(src/airlock/router.py) resolves it before calling this function,
+since it must be part of the signed record, not appended after
+signing.
 
 emit_override_evidence() signs a distinct record type for admin
 overrides (src/supervisor/), using the same mechanism. It is purely
@@ -39,7 +42,9 @@ from typing import Optional
 from src.core.evaluator import Verdict
 
 
-def emit_evidence(claim_payload: dict, verdict: Verdict, authority_binding_id: Optional[str] = None) -> dict:
+def emit_evidence(
+    claim_payload: dict, verdict: Verdict, authority_binding_id: Optional[list[str]] = None
+) -> dict:
     """
     Wraps an adjudication verdict in a hashed, timestamped, JSON-LD
     envelope — structurally matching synapse_mdm.py's `emit_evidence`.

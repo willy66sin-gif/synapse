@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class WorkType(str, Enum):
@@ -96,3 +96,28 @@ class ClaimPayload(BaseModel):
     payload_data: dict[str, Any]
     work_type: WorkType
     ptw_context: Optional[PtwContext] = None
+    # Design-alteration self-declaration (2026-08-18): defaults to
+    # False/None so every existing claim payload stays valid unedited.
+    # Self-declared only, per explicit scope -- no detection logic, no
+    # verification that the flag is honestly raised. Feeds
+    # src/maestro/directory.py's resolve_authority() is_design_alteration
+    # parameter (via evidence["input_payload"], same threading path
+    # zone_id/action_type already use) to route to QP/QE.
+    is_design_alteration: bool = False
+    alteration_description: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _alteration_description_matches_flag(self) -> "ClaimPayload":
+        """
+        Fail-closed at the schema boundary: alteration_description must
+        be present when is_design_alteration is True (an alteration
+        claim with no description is exactly the kind of malformed
+        input this file's own doctrine rejects at 422, not best-effort
+        parsed), and must be absent when False (a description with no
+        flag is an equally inconsistent payload, not silently ignored).
+        """
+        if self.is_design_alteration and not self.alteration_description:
+            raise ValueError("alteration_description is required when is_design_alteration is True.")
+        if not self.is_design_alteration and self.alteration_description is not None:
+            raise ValueError("alteration_description must be null when is_design_alteration is False.")
+        return self

@@ -72,7 +72,21 @@ async def submit_claim(
 
     authority_binding_id = None
     if verdict["decision"] == "NO_GO":
-        authority_binding_id = resolve_authority(claim.zone_id, verdict["reason_code"]).binding_id
+        # 2026-08-18: resolve_authority() now returns a list (reason_code
+        # binding first, then QP/QE if claim.is_design_alteration) -- see
+        # its own docstring. Persisted here as a list of binding_ids,
+        # same "list, not a single winner" shape used everywhere else
+        # this pass touched. Still gated to NO_GO only, unchanged from
+        # before this pass -- GO's persisted authority_binding_id stays
+        # None, matching the existing, locked NO_GO Notification
+        # Principle (GO never triggers a Maestro alert either way); a
+        # GO claim's design-alteration bindings are still fully visible
+        # live via the Frontline/Supervisor screens' own
+        # resolve_authority() calls against evidence["input_payload"].
+        authority_binding_id = [
+            binding.binding_id
+            for binding in resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
+        ]
 
     evidence = emit_evidence(claim.model_dump(mode="json"), verdict, authority_binding_id=authority_binding_id)
     await persist_adjudication_record(session, evidence)

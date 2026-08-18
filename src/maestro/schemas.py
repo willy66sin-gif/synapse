@@ -50,8 +50,11 @@ class OutboundAlert(BaseModel):
     rule_trace: list[RuleConditionResult]
     conflicting_condition: Optional[RuleConditionResult] = None
     reason_code: Optional[str] = None
-    authority_binding_id: Optional[str] = None
-    assigned_role: Optional[str] = None
+    # List-valued as of 2026-08-18: resolve_authority() now returns every
+    # applicable AuthorityBinding (reason_code tier, plus QP/QE if the
+    # claim is a design alteration) -- see from_evidence_record() below.
+    authority_binding_id: list[str] = []
+    assigned_role: list[str] = []
     evaluated_at: str
     recipient_id: str
     escalation_contact: str
@@ -82,37 +85,56 @@ class OutboundAlert(BaseModel):
         Principle): who owns escalation is a resolved fact, not
         caller-supplied operational detail, so this now calls
         src/maestro/directory.py's resolve_authority(zone_id,
-        reason_code) itself — keyed on the adjudicated failure reason,
-        not on claim_type/work_type — and populates recipient_id,
-        authority_binding_id, assigned_role, and escalation_contact
-        directly from the resolved AuthorityBinding. This applies
-        uniformly to GO and NO_GO alike (GO resolves reason_code=None,
-        landing on the ("*", "*") catch-all) — the Escalation
-        Requirement already applies to every alert regardless of
-        decision. recipient_id falls back to the binding's role name
-        when no real contact_id is on file yet (true for the catch-all
-        today), rather than fabricating one. zone_id is not on the
-        evidence record itself — Evidence stays decoupled from
-        Airlock's ClaimPayload shape — so it's passed explicitly by
-        the caller instead of reached for inside
+        reason_code, is_design_alteration) itself — keyed on the
+        adjudicated failure reason (not claim_type/work_type) plus the
+        claim's self-declared design-alteration flag — and populates
+        recipient_id, authority_binding_id, assigned_role, and
+        escalation_contact from every resolved AuthorityBinding. This
+        applies uniformly to GO and NO_GO alike (GO resolves
+        reason_code=None, landing on the ("*", "*") catch-all unless
+        RTO's own routing applies) — the Escalation Requirement already
+        applies to every alert regardless of decision. is_design_alteration
+        is read from evidence["input_payload"] (2026-08-18) — the same
+        already-established path zone_id/action_type are read from
+        elsewhere in this codebase, since ClaimPayload's full model_dump()
+        is what src/evidence/emitter.py persists as input_payload.
+
+        List-valued as of 2026-08-18 (resolve_authority() now returns
+        every applicable binding, not one — the reason_code tier and
+        the design-alteration tier are orthogonal and both can be true
+        at once): authority_binding_id and assigned_role are the full
+        lists, in resolve_authority()'s order. recipient_id and
+        escalation_contact stay single, human-readable strings (joined
+        with ", " across all resolved bindings) rather than becoming
+        lists themselves — they feed directly into adapter/formatting
+        f-string interpolation (src/maestro/adapters/, formatting.py),
+        which expects a scalar to display, not a structured value to
+        parse. recipient_id falls back to a binding's role name when no
+        real contact_id is on file yet (true for every binding today),
+        rather than fabricating one.
+
+        zone_id is not on the evidence record itself — Evidence stays
+        decoupled from Airlock's ClaimPayload shape — so it's passed
+        explicitly by the caller instead of reached for inside
         evidence["input_payload"].
 
         Supervisor Override Retirement (2026-08-05): escalation_contact
         no longer builds a directory.SUPERVISOR_OVERRIDE_URL link — the
         override endpoint it pointed to is retired, and an escalation
         contact must not point somewhere that no longer does anything.
-        It now states the resolved authority directly (role and
+        It now states the resolved authority(s) directly (role and
         binding_id), matching what the Frontline Worker screen already
-        shows for the same resolved binding.
+        shows for the same resolved binding(s).
         """
         rule_trace = [RuleConditionResult(**rule) for rule in evidence["rule_trace"]]
         conflicting = None
         if evidence["decision"] == "NO_GO":
             conflicting = next((rule for rule in rule_trace if not rule.passed), None)
 
-        binding = resolve_authority(zone_id, evidence["reason_code"])
-        recipient_id = binding.contact_id or binding.role
-        escalation_contact = f"{binding.role} ({binding.binding_id})"
+        is_design_alteration = evidence.get("input_payload", {}).get("is_design_alteration", False)
+        bindings = resolve_authority(zone_id, evidence["reason_code"], is_design_alteration)
+        recipient_id = ", ".join(binding.contact_id or binding.role for binding in bindings)
+        escalation_contact = ", ".join(f"{binding.role} ({binding.binding_id})" for binding in bindings)
 
         return cls(
             claim_id=evidence["claim_id"],
@@ -120,8 +142,8 @@ class OutboundAlert(BaseModel):
             rule_trace=rule_trace,
             conflicting_condition=conflicting,
             reason_code=evidence["reason_code"],
-            authority_binding_id=binding.binding_id,
-            assigned_role=binding.role,
+            authority_binding_id=[binding.binding_id for binding in bindings],
+            assigned_role=[binding.role for binding in bindings],
             evaluated_at=evidence["evaluated_at"],
             recipient_id=recipient_id,
             escalation_contact=escalation_contact,
