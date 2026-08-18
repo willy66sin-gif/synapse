@@ -138,8 +138,8 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-PTW-01"
-    # Only the ("*", "*") catch-all is seeded today -- see DIRECTORY_MAP.
-    assert response.json()["authority_binding_id"] == "BIND-999"
+    # R-PTW-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
+    assert response.json()["authority_binding_id"] == "BIND-RTO-01"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
@@ -147,8 +147,8 @@ def test_ptw_precondition_no_go_triggers_maestro_alert_with_reason_code(maestro_
         assert alert.reason_code == "R-PTW-01"
         assert alert.conflicting_condition is not None
         assert alert.conflicting_condition.rule_id == "ptw_precondition_check"
-        assert alert.authority_binding_id == "BIND-999"
-        assert alert.assigned_role == "General Duty Officer"
+        assert alert.authority_binding_id == "BIND-RTO-01"
+        assert alert.assigned_role == "RTO"
 
 
 def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -159,14 +159,15 @@ def test_authority_failure_no_go_triggers_maestro_alert_with_reason_code(maestro
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
     assert response.json()["reason_code"] == "R-AUTH-01"
-    assert response.json()["authority_binding_id"] == "BIND-999"
+    # R-AUTH-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
+    assert response.json()["authority_binding_id"] == "BIND-RTO-01"
 
     assert {label for label, _ in maestro_calls} == {"whatsapp", "telegram"}
     for _, alert in maestro_calls:
         assert alert.reason_code == "R-AUTH-01"
         assert alert.conflicting_condition.rule_id == "authority_check"
-        assert alert.authority_binding_id == "BIND-999"
-        assert alert.assigned_role == "General Duty Officer"
+        assert alert.authority_binding_id == "BIND-RTO-01"
+        assert alert.assigned_role == "RTO"
 
 
 def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls):
@@ -201,7 +202,8 @@ def test_maestro_alert_carries_escalation_contact_and_recipient(maestro_calls):
 
     assert len(maestro_calls) == 2
     for _, alert in maestro_calls:
-        assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet -> role fallback
+        # R-AUTH-01 resolves to RTO (2026-08-18, direct confirmation) -- see DIRECTORY_MAP.
+        assert alert.recipient_id == "RTO"  # no contact_id on file yet -> role fallback
         # Supervisor Override Retirement (5 Aug 2026): escalation_contact states the
         # resolved authority directly, not an override URL -- see src/maestro/schemas.py.
-        assert alert.escalation_contact == "General Duty Officer (BIND-999)"
+        assert alert.escalation_contact == "RTO (BIND-RTO-01)"

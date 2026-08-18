@@ -143,31 +143,15 @@ SUPERVISOR_OVERRIDE_URL = "https://synapse.local/supervisor/override"
 # (zone_id, reason_code) lookup, just keyed generically on reason_code
 # rather than a specific zone.
 #
-# Only R-ZONE-01 -> SA is added: it's the one mapping actually
-# confirmed as unambiguous ("R-ZONE-01 -> SA are clean", per the
-# handoff that introduced the five reason codes this routes). The
-# other four reason codes are deliberately left unrouted (fall through
-# to the ("*", "*") catch-all below), not guessed at:
-#   - R-PTW-01: the handoff that introduced this routing table paired
-#     it with "PI/PA" together, not a single role. PI has since been
-#     removed outright as a category error (2026-08-14 -- see
-#     src/core/roles.py's own doc comment: it named an academic
-#     research role, not a construction authority), which narrows the
-#     original pairing to PA alone -- but that narrowing is an
-#     elimination, not a confirmation. The original handoff never said
-#     "PA is the answer," only "it's PI or PA (or both)"; removing the
-#     wrong option doesn't retroactively confirm the remaining one.
-#     R-PTW-01 stays unrouted until PA is independently confirmed, not
-#     promoted by default because its erroneous alternative was
-#     deleted.
-#   - R-AUTH-01/02/03: R-AUTH-01 is an unauthenticated-issuer failure,
-#     not a domain/technical one -- no PE/QP/PA/PM/SA role is an
-#     honest fit for "we don't know who submitted this." R-AUTH-02/03
-#     are new (2026-08-06, R-AUTH-01 disambiguation) and postdate the
-#     "clean" assessment above entirely -- nothing has confirmed a
-#     role for them yet, so nothing is asserted here.
-# Each of these four can gain its own ("*", reason_code) entry later,
-# the same way R-ZONE-01 just did, once/if a real answer exists.
+# R-ZONE-01 -> SA was the first mapping confirmed unambiguous
+# ("R-ZONE-01 -> SA are clean", per the handoff that introduced the
+# five reason codes this routes). R-PTW-01 and R-AUTH-01/02/03 -> RTO
+# were confirmed later (2026-08-18, direct confirmation -- see the
+# routing-expansion comment block below for the full history,
+# including the superseded R-PTW-01/PA reasoning this replaces). No
+# reason code below this point is left deliberately unrouted anymore --
+# see the routing-expansion comment block for exactly what changed and
+# why.
 _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
     "BIND-SA-01",
     # Computed via role_type_label(), not a hardcoded literal -- today
@@ -187,25 +171,36 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 # Routing expansion (2026-08-18, GC discipline-split follow-up --
 # confirmed by both Ganesh and Ben Chin, asserted grounding per this
 # file's own Execution Evidence Authority discipline, not repo-verified
-# fact). Three decisions, one addition, two explicit non-additions:
+# fact). Three decisions, two now live, one still not:
 #
-# 1. RTO as the default (reason_code=None / GO) routing target --
-#    REVERTED the same day it was added. Originally wired live as
-#    ("*", None), making GO resolve to RTO instead of the catch-all.
-#    That wiring decision was made unilaterally after being correctly
+# 1. RTO as the live routing target for reason_code=None (GO) and for
+#    R-PTW-01/R-AUTH-01/R-AUTH-02/R-AUTH-03 (2026-08-18, direct
+#    confirmation -- explicit, not speculative). History: the
+#    reason_code=None wiring was first added, then REVERTED the same
+#    day -- it had been implemented unilaterally after being correctly
 #    flagged as a real architecture question (via AskUserQuestion) but
-#    without waiting for actual sign-off on the answer -- reverted per
-#    explicit instruction, not because the underlying reasoning (RTO as
-#    RE/QP's continuous on-site representative, the go-to gate for
-#    day-to-day compliance) was found wrong, just unconfirmed. RTO is
-#    now structural-only, same status as QP/QE below: defined
-#    (_CONTINUOUS_COMPLIANCE_AUTHORITY) and present in DIRECTORY_MAP
-#    only under an inert placeholder key ("*", "CONTINUOUS_COMPLIANCE"),
-#    not the real ("*", None) tier. GO still resolves to the untyped
-#    ("*", "*") catch-all (BIND-999 / "General Duty Officer"), exactly
-#    as it did before this entire routing-expansion pass. Do not
-#    re-wire this to ("*", None) without real sign-off on the
-#    interpretation this time.
+#    without waiting for actual sign-off on the answer. RTO was made
+#    structural-only for a pass (an inert placeholder key, matching
+#    QP/QE's status) pending that sign-off. It has since been given,
+#    explicitly and for all five cases together, so all five are now
+#    live: ("*", None), ("*", "R-PTW-01"), ("*", "R-AUTH-01"),
+#    ("*", "R-AUTH-02"), ("*", "R-AUTH-03") all resolve to
+#    _CONTINUOUS_COMPLIANCE_AUTHORITY (BIND-RTO-01). This supersedes
+#    the earlier R-PTW-01/PA reasoning above (R-PTW-01 was left
+#    unrouted pending independent PA confirmation -- that question is
+#    now moot for routing purposes, since R-PTW-01 routes to RTO
+#    instead, not because PA was ever confirmed) and the earlier
+#    R-AUTH-01/02/03 reasoning (no PE/QP/PA/PM/SA role was an honest
+#    fit for "we don't know who submitted this" -- RTO, confirmed
+#    separately as the continuous on-site compliance gate, is the
+#    answer that was actually given, not a domain-role guess). R-ZONE-01
+#    is deliberately NOT included -- it already has its own confirmed,
+#    unrelated routing to SA (above), untouched by this change. The
+#    ("*", "*") catch-all itself is untouched and still required to
+#    exist -- it remains the fallback for any reason_code not
+#    explicitly named here (there is none among Core's current rule set
+#    left unrouted today, but the catch-all still guards against a
+#    future, not-yet-named one).
 #
 # 2. QP/QE stay TRIGGERED, not CONTINUOUS -- structural entries only,
 #    same "ship the shape, not fabricated behavior" discipline as
@@ -245,10 +240,8 @@ _CONTINUOUS_COMPLIANCE_AUTHORITY = AuthorityBinding(
     AuthorityRoleType.RTO,
     None,
     # CONTINUOUS reflects what RTO actually is (RE/QP's continuous
-    # on-site representative, per point 1 above) -- unrelated to
-    # whether this binding is live. Reverted to a placeholder-keyed,
-    # non-live entry below; only the ("*", None) wiring was undone, not
-    # this activation-mode fact.
+    # on-site representative, per point 1 above) -- true regardless of
+    # which reason_code keys route to it below.
     ActivationMode.CONTINUOUS,
 )
 
@@ -273,28 +266,27 @@ _DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
     "design_alteration",
 )
 
-# Starts with two entries: the untyped catch-all default, and the one
-# confirmed reason_code routing above. role_type intentionally left
-# None on the catch-all -- "General Duty Officer" is not one of the
-# licensed PE/QP/PA/PM/SA/QE/RTO roles. Real (zone_id, reason_code)
-# entries -- and real contact_id/discipline/activation values -- get
-# added here as actual site authorities are identified and bound to
-# real registrations.
+# role_type intentionally left None on the catch-all -- "General Duty
+# Officer" is not one of the licensed PE/QP/PA/PM/SA/QE/RTO roles. It
+# remains the required fallback (resolve_authority() fails closed if
+# it's ever missing) for any reason_code not explicitly routed below --
+# not removed, just no longer hit by any of Core's current rule set.
 #
-# Expanded 2026-08-18 (see the comment block above), then partially
-# reverted the same day: RTO's ("*", None) live wiring was undone
-# (point 1 above) since it was implemented without waiting for sign-off
-# on the interpretation -- GO (reason_code=None) resolves to the
-# ("*", "*") catch-all again, exactly as before this pass. RTO,
-# like QP/QE, is now present only under an inert placeholder key that
-# no real Verdict.reason_code value can ever produce -- structurally
-# defined, not live. QP/QE's two placeholder-keyed, structurally-
-# TRIGGERED entries (point 2 above) are unchanged by this revert. PM
-# and PA remain absent entirely, per point 3 above.
+# Expanded 2026-08-18 (see the routing-expansion comment block above):
+# RTO is now the live target for five entries -- reason_code=None (GO)
+# and R-PTW-01/R-AUTH-01/R-AUTH-02/R-AUTH-03 -- confirmed directly, not
+# speculative. R-ZONE-01 keeps its own separate, earlier-confirmed
+# routing to SA, untouched. QP/QE's two placeholder-keyed,
+# structurally-TRIGGERED entries (point 2 above) are unaffected by this
+# expansion. PM and PA remain absent entirely, per point 3 above.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
-    ("*", "CONTINUOUS_COMPLIANCE"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", None): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "R-PTW-01"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "R-AUTH-01"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "R-AUTH-02"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "R-AUTH-03"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "DESIGN_ALTERATION_QP"): _DESIGN_ALTERATION_QP_AUTHORITY,
     ("*", "DESIGN_ALTERATION_QE"): _DESIGN_ALTERATION_QE_AUTHORITY,
 }

@@ -109,14 +109,18 @@ def test_blocked_screen_renders_for_real_no_go_claim():
     body = response.text
     assert "CLM-EPTW-301" in body
     assert "R-PTW-01" in body
+    # "BIND-999" here is the raw, persisted evidence["authority_binding_id"]
+    # fixture value rendered verbatim (src/supervisor/router.py never
+    # recomputes this field) -- unrelated to the live resolve_authority()
+    # call below, which now resolves R-PTW-01 to RTO.
     assert "BIND-999" in body
     assert "ptw_precondition_check" in body
     assert '"/static/blocked-screen/blocked-screen.js"' in body
-    # 2026-08-06, Task A: this route now calls resolve_authority() --
-    # R-PTW-01 is deliberately unrouted (see CLAUDE.md's Open Items),
-    # so it resolves via the catch-all, same as before this route
-    # called resolve_authority() at all.
-    assert '"assignedRole": "General Duty Officer"' in body
+    # 2026-08-06, Task A: this route calls resolve_authority() for
+    # assignedRole. R-PTW-01 now resolves to RTO (2026-08-18, direct
+    # confirmation), superseding the earlier "deliberately unrouted"
+    # state (see CLAUDE.md's Open Items for that history).
+    assert '"assignedRole": "RTO"' in body
 
 
 def test_blocked_screen_renders_resolved_role_for_zone_safety_no_go():

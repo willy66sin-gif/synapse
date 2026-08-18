@@ -107,8 +107,11 @@ def test_frontline_screen_renders_for_no_go_claim():
 
     body = response.text
     assert "CLM-EPTW-301" in body
-    assert "General Duty Officer" in body
-    assert "BIND-999" in body
+    # R-PTW-01 resolves to RTO (2026-08-18, direct confirmation) --
+    # live-resolved via resolve_authority(), not the fixture's raw
+    # (stale) authority_binding_id field -- see src/frontline/router.py.
+    assert "RTO" in body
+    assert "BIND-RTO-01" in body
     assert "No permit-to-work context provided" in body
     assert '"/static/frontline-screen/frontline-screen.js"' in body
 
@@ -134,7 +137,8 @@ def test_frontline_screen_renders_for_go_claim():
     assert response.status_code == 200
     body = response.text
     assert "CLM-101" in body
-    assert "General Duty Officer" in body
+    # GO (reason_code=None) resolves to RTO (2026-08-18, direct confirmation).
+    assert "RTO" in body
     assert "MATERIAL_ENTRY" in body
 
 

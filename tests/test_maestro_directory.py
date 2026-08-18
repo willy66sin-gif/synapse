@@ -67,28 +67,46 @@ def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(
     assert result != CATCH_ALL
 
 
-def test_real_directory_map_resolves_via_catch_all_for_unrouted_reason_codes():
-    """Against the actual shipped DIRECTORY_MAP (not monkeypatched):
-    R-ZONE-01 has its own routing entry as of 2026-08-06 (see the
-    dedicated test below) -- every OTHER reason_code, deliberately left
-    unrouted (see DIRECTORY_MAP's own comment for exactly why each
-    one), still falls through to the catch-all. reason_code=None (GO)
-    briefly had its own live routing entry (2026-08-18) but that wiring
-    was reverted the same day, pending real sign-off -- see
-    directory.py's own comment -- so GO falls through to the catch-all
-    again too."""
+def test_real_directory_map_resolves_via_catch_all_for_a_genuinely_unrouted_reason_code():
+    """Against the actual shipped DIRECTORY_MAP (not monkeypatched): no
+    reason_code Core's current rule set can actually produce is left
+    unrouted anymore as of 2026-08-18 -- R-ZONE-01 routes to SA,
+    reason_code=None (GO) and R-PTW-01/R-AUTH-01/02/03 all route to RTO
+    (direct confirmation -- see directory.py's own comment for the
+    full history, including the earlier revert). The catch-all itself
+    is untouched and still required to exist: this exercises it via a
+    synthetic reason_code no real Verdict ever produces, confirming
+    fallback behavior still works for whatever is NOT explicitly named
+    in DIRECTORY_MAP."""
+    result = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
+
+    assert result.binding_id == "BIND-999"
+    assert result.role == "General Duty Officer"
+    assert result.contact_id is None
+    assert result.role_type is None
+
+
+def test_real_directory_map_routes_all_five_confirmed_reason_codes_to_rto():
+    """2026-08-18, direct confirmation (explicit, not speculative):
+    reason_code=None (GO) and R-PTW-01/R-AUTH-01/R-AUTH-02/R-AUTH-03 all
+    resolve to RTO -- superseding the earlier "R-PTW-01 stays unrouted
+    pending PA confirmation" and "no PE/QP/PA/PM/SA role honestly fits
+    R-AUTH-01" reasoning (see directory.py's own comment for the full
+    history). R-ZONE-01 is deliberately excluded here -- it keeps its
+    own earlier, unrelated routing to SA."""
     for zone_id, reason_code in [
+        ("ZONE-01", None),
+        ("ZONE-99", None),
+        (None, None),
         ("ZONE-01", "R-PTW-01"),
         ("ZONE-99", "R-AUTH-01"),
         ("ZONE-01", "R-AUTH-02"),
         ("ZONE-01", "R-AUTH-03"),
-        (None, None),
     ]:
         result = resolve_authority(zone_id, reason_code)
-        assert result.binding_id == "BIND-999"
-        assert result.role == "General Duty Officer"
-        assert result.contact_id is None
-        assert result.role_type is None
+        assert result.binding_id == "BIND-RTO-01"
+        assert result.role == "RTO"
+        assert result.role_type == AuthorityRoleType.RTO
 
 
 def test_real_directory_map_routes_r_zone_01_to_sa():
@@ -119,10 +137,11 @@ def test_resolve_authority_raises_if_catch_all_missing(monkeypatch):
 
 def test_real_catch_all_has_no_role_type():
     """The shipped catch-all is deliberately untyped: "General Duty
-    Officer" is not one of the licensed PE/QP/PI/PA/PM/SA roles, and no
-    real typed entries are populated in this pass (schema/structure
-    only -- see directory.py's own comment)."""
-    result = resolve_authority("ZONE-01", "R-PTW-01")
+    Officer" is not one of the licensed PE/QP/PA/PM/SA/QE/RTO roles.
+    Exercised via a synthetic reason_code no real Verdict produces --
+    R-PTW-01 no longer reaches the catch-all as of 2026-08-18 (it now
+    routes to RTO, see the routing-expansion tests above)."""
+    result = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
 
     assert result.role_type is None
 
@@ -202,11 +221,15 @@ def test_authority_binding_accepts_a_triggered_activation_with_a_trigger_descrip
 def test_real_directory_map_bindings_are_still_continuous_with_no_discipline():
     """Regression guard against this pass's own scope: the real,
     shipped DIRECTORY_MAP must not have gained fabricated discipline/
-    activation data as a side effect of adding the fields."""
-    catch_all = resolve_authority("ZONE-01", "R-PTW-01")
+    activation data as a side effect of adding the fields. Checks the
+    true catch-all (via a synthetic, never-real reason_code -- R-PTW-01
+    no longer reaches it as of 2026-08-18, see the routing-expansion
+    tests above), R-ZONE-01's SA binding, and R-PTW-01's RTO binding."""
+    catch_all = resolve_authority("ZONE-01", "R-DOES-NOT-EXIST-99")
     zone_safety = resolve_authority("ZONE-01", "R-ZONE-01")
+    ptw_authority = resolve_authority("ZONE-01", "R-PTW-01")
 
-    for binding in (catch_all, zone_safety):
+    for binding in (catch_all, zone_safety, ptw_authority):
         assert binding.discipline is None
         assert binding.activation == ActivationMode.CONTINUOUS
         assert binding.activation_trigger is None
