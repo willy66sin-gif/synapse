@@ -69,16 +69,20 @@ def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(
 
 def test_real_directory_map_resolves_via_catch_all_for_unrouted_reason_codes():
     """Against the actual shipped DIRECTORY_MAP (not monkeypatched):
-    R-ZONE-01 has its own routing entry as of 2026-08-06, and
-    reason_code=None (GO) has its own routing entry as of 2026-08-18
-    (see the dedicated tests below for both) -- every OTHER reason_code,
-    deliberately left unrouted (see DIRECTORY_MAP's own comment for
-    exactly why each one), still falls through to the catch-all."""
+    R-ZONE-01 has its own routing entry as of 2026-08-06 (see the
+    dedicated test below) -- every OTHER reason_code, deliberately left
+    unrouted (see DIRECTORY_MAP's own comment for exactly why each
+    one), still falls through to the catch-all. reason_code=None (GO)
+    briefly had its own live routing entry (2026-08-18) but that wiring
+    was reverted the same day, pending real sign-off -- see
+    directory.py's own comment -- so GO falls through to the catch-all
+    again too."""
     for zone_id, reason_code in [
         ("ZONE-01", "R-PTW-01"),
         ("ZONE-99", "R-AUTH-01"),
         ("ZONE-01", "R-AUTH-02"),
         ("ZONE-01", "R-AUTH-03"),
+        (None, None),
     ]:
         result = resolve_authority(zone_id, reason_code)
         assert result.binding_id == "BIND-999"
@@ -211,18 +215,6 @@ def test_real_directory_map_bindings_are_still_continuous_with_no_discipline():
 # --- Routing expansion (2026-08-18): RTO default, QP/QE structural-only, PM/PA unrouted ---
 
 
-def test_real_directory_map_routes_a_standard_compliance_check_to_rto():
-    """GO (reason_code=None) is the continuous, day-to-day,
-    nothing-currently-wrong state -- confirmed by Ganesh and Ben Chin as
-    RTO's gate (RE/QP's continuous on-site representative). Resolves via
-    the ("*", None) tier for any zone_id, same "no more-specific entry
-    seeded" shape as R-ZONE-01's SA routing above."""
-    for zone_id in ("ZONE-01", "ZONE-99", None):
-        result = resolve_authority(zone_id, None)
-        assert result.binding_id == "BIND-RTO-01"
-        assert result.role == "RTO"
-        assert result.role_type == AuthorityRoleType.RTO
-        assert result.activation == ActivationMode.CONTINUOUS
 
 
 def test_qp_qe_routing_does_not_fire_for_any_real_reason_code():

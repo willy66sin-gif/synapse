@@ -131,16 +131,14 @@ def test_from_evidence_record_builds_from_real_evidence_go():
     assert alert.conflicting_condition is None
     assert alert.claim_id == "CLM-101"
     assert alert.reason_code is None
-    # GO (reason_code=None) now resolves via its own routing entry
-    # (2026-08-18) to RTO, not the ("*", "*") catch-all -- see
-    # src/maestro/directory.py's DIRECTORY_MAP (the Escalation
-    # Requirement still applies regardless of decision).
-    assert alert.authority_binding_id == "BIND-RTO-01"
-    assert alert.assigned_role == "RTO"
-    assert alert.recipient_id == "RTO"  # no contact_id on file yet
+    # Only the ("*", "*") catch-all is seeded today, so GO resolves to it too
+    # (the Escalation Requirement applies regardless of decision).
+    assert alert.authority_binding_id == "BIND-999"
+    assert alert.assigned_role == "General Duty Officer"
+    assert alert.recipient_id == "General Duty Officer"  # no contact_id on file yet
     # Supervisor Override Retirement (5 Aug 2026): states the resolved authority
     # directly, not an override URL -- see OutboundAlert.from_evidence_record().
-    assert alert.escalation_contact == "RTO (BIND-RTO-01)"
+    assert alert.escalation_contact == "General Duty Officer (BIND-999)"
 
 
 def test_from_evidence_record_builds_from_real_evidence_no_go():

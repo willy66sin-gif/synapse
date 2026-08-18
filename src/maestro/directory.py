@@ -190,19 +190,22 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 # fact). Three decisions, one addition, two explicit non-additions:
 #
 # 1. RTO as the default (reason_code=None / GO) routing target --
-#    added below as ("*", None). GO already resolves reason_code=None
-#    uniformly with NO_GO (see resolve_authority()'s docstring and
-#    every one of its four call sites) and previously fell through all
-#    the way to the untyped ("*", "*") catch-all, same as a genuinely
-#    unclassified failure. RTO is confirmed as RE/QP's continuous
-#    on-site representative -- the actual go-to gate for day-to-day,
-#    nothing-currently-wrong compliance -- so GO now resolves to a real
-#    typed binding instead of the generic fallback. This does NOT touch
-#    the ("*", "*") entry itself: still-unrouted NO_GO failure codes
-#    (R-PTW-01, R-AUTH-01/02/03) keep falling through to BIND-999/
-#    "General Duty Officer" exactly as before -- RTO is not an honest
-#    fit for e.g. R-AUTH-01 ("we don't know who submitted this"), so
-#    the true catch-all is deliberately left alone.
+#    REVERTED the same day it was added. Originally wired live as
+#    ("*", None), making GO resolve to RTO instead of the catch-all.
+#    That wiring decision was made unilaterally after being correctly
+#    flagged as a real architecture question (via AskUserQuestion) but
+#    without waiting for actual sign-off on the answer -- reverted per
+#    explicit instruction, not because the underlying reasoning (RTO as
+#    RE/QP's continuous on-site representative, the go-to gate for
+#    day-to-day compliance) was found wrong, just unconfirmed. RTO is
+#    now structural-only, same status as QP/QE below: defined
+#    (_CONTINUOUS_COMPLIANCE_AUTHORITY) and present in DIRECTORY_MAP
+#    only under an inert placeholder key ("*", "CONTINUOUS_COMPLIANCE"),
+#    not the real ("*", None) tier. GO still resolves to the untyped
+#    ("*", "*") catch-all (BIND-999 / "General Duty Officer"), exactly
+#    as it did before this entire routing-expansion pass. Do not
+#    re-wire this to ("*", None) without real sign-off on the
+#    interpretation this time.
 #
 # 2. QP/QE stay TRIGGERED, not CONTINUOUS -- structural entries only,
 #    same "ship the shape, not fabricated behavior" discipline as
@@ -241,6 +244,11 @@ _CONTINUOUS_COMPLIANCE_AUTHORITY = AuthorityBinding(
     None,
     AuthorityRoleType.RTO,
     None,
+    # CONTINUOUS reflects what RTO actually is (RE/QP's continuous
+    # on-site representative, per point 1 above) -- unrelated to
+    # whether this binding is live. Reverted to a placeholder-keyed,
+    # non-live entry below; only the ("*", None) wiring was undone, not
+    # this activation-mode fact.
     ActivationMode.CONTINUOUS,
 )
 
@@ -273,16 +281,20 @@ _DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
 # added here as actual site authorities are identified and bound to
 # real registrations.
 #
-# Expanded 2026-08-18 (see the comment block above): a real ("*", None)
-# entry routes GO to RTO; two placeholder-keyed, structurally-TRIGGERED
-# entries for QP/QE are present but inert (see point 2 above) -- they
-# do not affect resolve_authority()'s behavior for any reason_code a
-# real Verdict can currently produce. PM and PA remain absent entirely,
-# per point 3 above.
+# Expanded 2026-08-18 (see the comment block above), then partially
+# reverted the same day: RTO's ("*", None) live wiring was undone
+# (point 1 above) since it was implemented without waiting for sign-off
+# on the interpretation -- GO (reason_code=None) resolves to the
+# ("*", "*") catch-all again, exactly as before this pass. RTO,
+# like QP/QE, is now present only under an inert placeholder key that
+# no real Verdict.reason_code value can ever produce -- structurally
+# defined, not live. QP/QE's two placeholder-keyed, structurally-
+# TRIGGERED entries (point 2 above) are unchanged by this revert. PM
+# and PA remain absent entirely, per point 3 above.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
-    ("*", None): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "CONTINUOUS_COMPLIANCE"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "DESIGN_ALTERATION_QP"): _DESIGN_ALTERATION_QP_AUTHORITY,
     ("*", "DESIGN_ALTERATION_QE"): _DESIGN_ALTERATION_QE_AUTHORITY,
 }
