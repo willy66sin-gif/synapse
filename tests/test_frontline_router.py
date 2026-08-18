@@ -126,7 +126,9 @@ def test_frontline_screen_renders_for_no_go_claim():
 
 def test_frontline_screen_renders_for_go_claim():
     """Unlike the Supervisor Blocked Screen, GO is a valid, renderable
-    state here -- not a 409."""
+    state here -- not a 409. GO (reason_code=None) resolves to RTO as of
+    2026-08-18 (see src/maestro/directory.py's DIRECTORY_MAP), not the
+    General Duty Officer catch-all anymore."""
     client = _client_with_record(GO_EVIDENCE)
 
     response = client.get("/frontline/blocked/CLM-101")
@@ -134,7 +136,7 @@ def test_frontline_screen_renders_for_go_claim():
     assert response.status_code == 200
     body = response.text
     assert "CLM-101" in body
-    assert "General Duty Officer" in body
+    assert "RTO" in body
     assert "MATERIAL_ENTRY" in body
 
 

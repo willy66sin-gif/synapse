@@ -184,6 +184,87 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
     AuthorityRoleType.SA,
 )
 
+# Routing expansion (2026-08-18, GC discipline-split follow-up --
+# confirmed by both Ganesh and Ben Chin, asserted grounding per this
+# file's own Execution Evidence Authority discipline, not repo-verified
+# fact). Three decisions, one addition, two explicit non-additions:
+#
+# 1. RTO as the default (reason_code=None / GO) routing target --
+#    added below as ("*", None). GO already resolves reason_code=None
+#    uniformly with NO_GO (see resolve_authority()'s docstring and
+#    every one of its four call sites) and previously fell through all
+#    the way to the untyped ("*", "*") catch-all, same as a genuinely
+#    unclassified failure. RTO is confirmed as RE/QP's continuous
+#    on-site representative -- the actual go-to gate for day-to-day,
+#    nothing-currently-wrong compliance -- so GO now resolves to a real
+#    typed binding instead of the generic fallback. This does NOT touch
+#    the ("*", "*") entry itself: still-unrouted NO_GO failure codes
+#    (R-PTW-01, R-AUTH-01/02/03) keep falling through to BIND-999/
+#    "General Duty Officer" exactly as before -- RTO is not an honest
+#    fit for e.g. R-AUTH-01 ("we don't know who submitted this"), so
+#    the true catch-all is deliberately left alone.
+#
+# 2. QP/QE stay TRIGGERED, not CONTINUOUS -- structural entries only,
+#    same "ship the shape, not fabricated behavior" discipline as
+#    discipline/activation themselves (2026-08-14, still unwired into
+#    resolve_authority()'s lookup key or precedence logic). There is no
+#    ClaimPayload field carrying a design-alteration signal today and
+#    no resolve_authority() parameter to read one -- adding either is a
+#    real schema/signature change, explicitly out of scope this pass.
+#    _DESIGN_ALTERATION_QP_AUTHORITY / _DESIGN_ALTERATION_QE_AUTHORITY
+#    below are inserted under placeholder keys that no real
+#    Verdict.reason_code value will ever produce (Core's rule set never
+#    emits "DESIGN_ALTERATION_QP"/"DESIGN_ALTERATION_QE" as a
+#    reason_code) -- present for future wiring, inert against all live
+#    traffic today. Do not wire a live design-alteration check by
+#    reusing these keys as a shortcut; that's the separate,
+#    not-yet-decided task this comment (and the 2026-08-14 one above
+#    it) already flags.
+#
+# 3. PM and PA remain unrouted -- deliberately no AuthorityBinding
+#    entry for either, for two different reasons, neither a placeholder
+#    omission:
+#      - PM: in-situ operational decisions pass through RTO's gate
+#        rather than routing independently -- PM is not a separate
+#        escalation target, its ground is already covered by (1) above.
+#      - PA: per-project liability assignment is still unconfirmed (see
+#        CLAUDE.md's Open Items -- the original R-PTW-01 handoff paired
+#        "PI/PA" together, not a single role, and PI has since been
+#        removed as a category error, which eliminates one option
+#        without confirming the other). Do not add a PA binding until
+#        that liability question actually resolves.
+_CONTINUOUS_COMPLIANCE_AUTHORITY = AuthorityBinding(
+    "BIND-RTO-01",
+    # Bare code "RTO" -- unconfirmed label, same posture as SA above
+    # (ROLE_TYPE_LABELS only has PE/QP confirmed; see src/core/roles.py).
+    role_type_label(AuthorityRoleType.RTO),
+    None,
+    AuthorityRoleType.RTO,
+    None,
+    ActivationMode.CONTINUOUS,
+)
+
+_DESIGN_ALTERATION_QP_AUTHORITY = AuthorityBinding(
+    "BIND-QP-DA-01",
+    role_type_label(AuthorityRoleType.QP),
+    None,
+    AuthorityRoleType.QP,
+    None,
+    ActivationMode.TRIGGERED,
+    "design_alteration",
+)
+
+_DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
+    "BIND-QE-DA-01",
+    # Bare code "QE" -- unconfirmed label, same posture as SA/RTO above.
+    role_type_label(AuthorityRoleType.QE),
+    None,
+    AuthorityRoleType.QE,
+    None,
+    ActivationMode.TRIGGERED,
+    "design_alteration",
+)
+
 # Starts with two entries: the untyped catch-all default, and the one
 # confirmed reason_code routing above. role_type intentionally left
 # None on the catch-all -- "General Duty Officer" is not one of the
@@ -191,9 +272,19 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 # entries -- and real contact_id/discipline/activation values -- get
 # added here as actual site authorities are identified and bound to
 # real registrations.
+#
+# Expanded 2026-08-18 (see the comment block above): a real ("*", None)
+# entry routes GO to RTO; two placeholder-keyed, structurally-TRIGGERED
+# entries for QP/QE are present but inert (see point 2 above) -- they
+# do not affect resolve_authority()'s behavior for any reason_code a
+# real Verdict can currently produce. PM and PA remain absent entirely,
+# per point 3 above.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
+    ("*", None): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "DESIGN_ALTERATION_QP"): _DESIGN_ALTERATION_QP_AUTHORITY,
+    ("*", "DESIGN_ALTERATION_QE"): _DESIGN_ALTERATION_QE_AUTHORITY,
 }
 
 

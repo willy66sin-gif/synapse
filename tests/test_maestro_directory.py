@@ -69,16 +69,16 @@ def test_precedence_order_prefers_more_specific_even_when_all_three_tiers_match(
 
 def test_real_directory_map_resolves_via_catch_all_for_unrouted_reason_codes():
     """Against the actual shipped DIRECTORY_MAP (not monkeypatched):
-    R-ZONE-01 has its own routing entry as of 2026-08-06 (see the
-    dedicated test below) -- every OTHER reason_code, deliberately left
-    unrouted (see DIRECTORY_MAP's own comment for exactly why each
-    one), still falls through to the catch-all."""
+    R-ZONE-01 has its own routing entry as of 2026-08-06, and
+    reason_code=None (GO) has its own routing entry as of 2026-08-18
+    (see the dedicated tests below for both) -- every OTHER reason_code,
+    deliberately left unrouted (see DIRECTORY_MAP's own comment for
+    exactly why each one), still falls through to the catch-all."""
     for zone_id, reason_code in [
         ("ZONE-01", "R-PTW-01"),
         ("ZONE-99", "R-AUTH-01"),
         ("ZONE-01", "R-AUTH-02"),
         ("ZONE-01", "R-AUTH-03"),
-        (None, None),
     ]:
         result = resolve_authority(zone_id, reason_code)
         assert result.binding_id == "BIND-999"
@@ -206,3 +206,73 @@ def test_real_directory_map_bindings_are_still_continuous_with_no_discipline():
         assert binding.discipline is None
         assert binding.activation == ActivationMode.CONTINUOUS
         assert binding.activation_trigger is None
+
+
+# --- Routing expansion (2026-08-18): RTO default, QP/QE structural-only, PM/PA unrouted ---
+
+
+def test_real_directory_map_routes_a_standard_compliance_check_to_rto():
+    """GO (reason_code=None) is the continuous, day-to-day,
+    nothing-currently-wrong state -- confirmed by Ganesh and Ben Chin as
+    RTO's gate (RE/QP's continuous on-site representative). Resolves via
+    the ("*", None) tier for any zone_id, same "no more-specific entry
+    seeded" shape as R-ZONE-01's SA routing above."""
+    for zone_id in ("ZONE-01", "ZONE-99", None):
+        result = resolve_authority(zone_id, None)
+        assert result.binding_id == "BIND-RTO-01"
+        assert result.role == "RTO"
+        assert result.role_type == AuthorityRoleType.RTO
+        assert result.activation == ActivationMode.CONTINUOUS
+
+
+def test_qp_qe_routing_does_not_fire_for_any_real_reason_code():
+    """No real Verdict.reason_code (R-PTW-01, R-AUTH-01/02/03, R-ZONE-01,
+    or GO's None) ever resolves to QP or QE -- there is no live
+    design-alteration signal anywhere in this codebase yet (no
+    ClaimPayload field, no resolve_authority() parameter), so QP/QE must
+    never fire for ordinary traffic. This is the "does NOT fire without
+    a design-alteration flag" half of the requirement."""
+    for zone_id, reason_code in [
+        ("ZONE-01", "R-PTW-01"),
+        ("ZONE-99", "R-AUTH-01"),
+        ("ZONE-01", "R-AUTH-02"),
+        ("ZONE-01", "R-AUTH-03"),
+        ("ZONE-01", "R-ZONE-01"),
+        ("ZONE-01", None),
+    ]:
+        result = resolve_authority(zone_id, reason_code)
+        assert result.role_type not in (AuthorityRoleType.QP, AuthorityRoleType.QE)
+
+
+def test_qp_qe_routing_fires_only_via_its_own_placeholder_trigger_key():
+    """The other half of the requirement: QP/QE routing DOES fire, but
+    only for the dedicated placeholder key that stands in for a real
+    design-alteration flag -- no live ClaimPayload field or
+    resolve_authority() parameter carries that signal yet (see
+    directory.py's 2026-08-18 comment), so this exercises the entries'
+    reachability through the existing (zone_id, reason_code) mechanism
+    directly, not a live conditional dispatch from real claim data."""
+    qp_result = resolve_authority("*", "DESIGN_ALTERATION_QP")
+    assert qp_result.binding_id == "BIND-QP-DA-01"
+    assert qp_result.role_type == AuthorityRoleType.QP
+    assert qp_result.activation == ActivationMode.TRIGGERED
+    assert qp_result.activation_trigger == "design_alteration"
+
+    qe_result = resolve_authority("*", "DESIGN_ALTERATION_QE")
+    assert qe_result.binding_id == "BIND-QE-DA-01"
+    assert qe_result.role_type == AuthorityRoleType.QE
+    assert qe_result.activation == ActivationMode.TRIGGERED
+    assert qe_result.activation_trigger == "design_alteration"
+
+
+def test_pm_and_pa_have_no_directory_entries():
+    """PM and PA are deliberately unrouted -- not skipped, asserted
+    absent. PM: in-situ operational decisions pass through RTO's gate
+    rather than routing independently. PA: per-project liability
+    assignment is still unconfirmed (see CLAUDE.md's Open Items).
+    Neither role_type appears on any binding anywhere in the real,
+    shipped DIRECTORY_MAP."""
+    role_types_in_use = {binding.role_type for binding in directory.DIRECTORY_MAP.values()}
+
+    assert AuthorityRoleType.PM not in role_types_in_use
+    assert AuthorityRoleType.PA not in role_types_in_use
