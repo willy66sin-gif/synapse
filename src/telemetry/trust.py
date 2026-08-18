@@ -46,9 +46,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.telemetry.repository import fetch_device_public_key
 
+# Reason code convention (src/core/rules.py: R-PTW-01, R-AUTH-01/02/03,
+# R-ZONE-01) -- R-<DOMAIN>-<NUMBER>, one per distinct failure class. Only
+# DeviceNotRegisteredError gets one here: it's a provisioning gap (device
+# never entered into DeviceRegistryEntry), a different remediation path
+# than TelemetrySignatureInvalidError's trust gap (known device, bad
+# signature -- key rotation/tamper investigation, not registry entry).
+# No evidence-emission call site exists yet for telemetry errors (see this
+# module's docstring -- there is no ingestion pathway to wire one into),
+# so this is attached to the exception itself, the same role
+# Verdict["reason_code"] plays for Core's adjudication failures, ready to
+# thread into evidence the same way once a real caller exists.
+REASON_CODE_DEVICE_NOT_REGISTERED = "R-DEV-01"
+
 
 class DeviceNotRegisteredError(LookupError):
     """No device_registry entry for this device_id. Mechanism works, no data -- distinct from a verification failure."""
+
+    reason_code = REASON_CODE_DEVICE_NOT_REGISTERED
 
 
 class TelemetrySignatureInvalidError(ValueError):

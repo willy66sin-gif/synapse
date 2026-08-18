@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from src.telemetry.trust import (
+    REASON_CODE_DEVICE_NOT_REGISTERED,
     DeviceNotRegisteredError,
     TelemetrySignatureInvalidError,
     _verify_signature,
@@ -121,3 +122,32 @@ def test_device_not_registered_and_signature_invalid_are_distinct_exception_type
     """The two failure modes must not be collapsed into one type -- see trust.py's module docstring."""
     assert not issubclass(DeviceNotRegisteredError, TelemetrySignatureInvalidError)
     assert not issubclass(TelemetrySignatureInvalidError, DeviceNotRegisteredError)
+
+
+# --- R-DEV-01 reason code (provisioning gap, distinct from a signature failure) ---
+
+
+@pytest.mark.asyncio
+async def test_r_dev_01_fires_for_an_unregistered_device():
+    session = _StubSession(None)
+
+    with pytest.raises(DeviceNotRegisteredError) as exc_info:
+        await verify_telemetry(session, "DEV-UNKNOWN", b"payload", b"signature")
+
+    assert exc_info.value.reason_code == REASON_CODE_DEVICE_NOT_REGISTERED == "R-DEV-01"
+
+
+@pytest.mark.asyncio
+async def test_r_dev_01_does_not_fire_for_a_registered_device_with_a_bad_signature():
+    """A registered device with a bad signature is a trust gap, not a provisioning gap --
+    it must still raise TelemetrySignatureInvalidError, which carries no reason_code."""
+    _, public_pem = _generate_keypair()
+    wrong_private_key, _ = _generate_keypair()
+    payload = b'{"device_id": "DEV-TEST-01", "reading": "ok"}'
+    signature = wrong_private_key.sign(payload)
+    session = _StubSession(public_pem)
+
+    with pytest.raises(TelemetrySignatureInvalidError) as exc_info:
+        await verify_telemetry(session, "DEV-TEST-01", payload, signature)
+
+    assert not hasattr(exc_info.value, "reason_code")
