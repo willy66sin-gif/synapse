@@ -68,7 +68,7 @@ Classifies the frontline-facing interaction stories the Blocked Screen (and any 
 Universal constraint, applying to all three: failure reason codes must never be displayed as, or implied to be, successful rule identifiers. Verified true of the current `blocked-screen.js`/`src/supervisor/router.py` data path as of this writing — `reason_code` and `rule_trace` entries are structurally and visually distinct throughout (`reason_code` renders only in the conflict block via a `.reason-code`-styled span, never inside a `rule-id`-styled, `passed: true` list item) — recorded here as a locked constraint going forward, not a fix to a found violation.
 
 ### Stage 2 Frontline Worker Contract (Approved Design Requirements — Implemented 5 Aug 2026 (`src/frontline/router.py`, `frontend/frontline-screen/frontline-screen.js`); originally recorded 1 Aug 2026 as NOT YET IMPLEMENTED — Copilot–Gemini Frontline Worker UI review)
-Approved UI/UX requirements for the frontline-facing surface. None of the following are built today — `frontend/blocked-screen/blocked-screen.js` is a supervisor-facing component that predates this contract and does not yet implement it; recording this as a target-state design contract only, not a description of current behavior:
+Approved UI/UX requirements for the frontline-facing surface. Implemented as of 5 Aug 2026 (see the header status line above); `frontend/blocked-screen/blocked-screen.js` remains a separate, supervisor-facing component that predates this contract and does not implement it — that distinction is unchanged:
 
 - Mobile-first, single-column layout.
 - Plain-language operational verdict, with an unmistakable first instruction: GO → "You may proceed"; NO_GO → "Do not proceed"; unavailable assurance → "Do not operate manually".
