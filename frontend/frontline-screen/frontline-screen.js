@@ -90,7 +90,7 @@ class FrontlineScreen extends HTMLElement {
       <section class="screen ${isBlocked ? "blocked" : "cleared"}" role="status" aria-live="polite">
         ${data.workActivity ? `<div class="work-activity">${escapeHtml(data.workActivity)}</div>` : ""}
 
-        <p class="primary-instruction">${isBlocked ? "Do not proceed." : "You may proceed."}</p>
+        <p class="primary-instruction">${isBlocked ? ICON_BLOCKED : ICON_CLEARED}${isBlocked ? "Do not proceed." : "You may proceed."}</p>
 
         ${isBlocked && data.reason ? `<p class="reason">${escapeHtml(data.reason)}</p>` : ""}
 
@@ -104,6 +104,17 @@ class FrontlineScreen extends HTMLElement {
     `;
   }
 }
+
+// Decorative, aria-hidden: the primary-instruction text already carries the
+// full meaning for screen readers. These exist so colour is never the only
+// signal for sighted users (CLAUDE.md's Stage 2 Frontline Worker Contract,
+// "text, icon, and colour together -- never colour alone") -- a colour-blind
+// user gets the same check/cross shape distinction a sighted user gets from
+// green/red. currentColor so each inherits its state's existing text colour
+// (.screen.blocked/.cleared .primary-instruction) with no separate icon color
+// to keep in sync.
+const ICON_CLEARED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l5 5L19 7"/></svg>`;
+const ICON_BLOCKED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18"/></svg>`;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -121,7 +132,8 @@ const STYLE = `
   .screen.blocked { border-color: #b3261e; background: #fdecea; }
   .screen.cleared { border-color: #1e7d32; background: #eaf6ec; }
   .work-activity { font-size: 0.9rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #444; margin-bottom: 1rem; }
-  .primary-instruction { font-weight: 800; font-size: 1.75rem; line-height: 1.2; margin: 0 0 0.75rem; }
+  .primary-instruction { font-weight: 800; font-size: 1.75rem; line-height: 1.2; margin: 0 0 0.75rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+  .primary-instruction .icon { flex-shrink: 0; }
   .screen.blocked .primary-instruction { color: #b3261e; }
   .screen.cleared .primary-instruction { color: #1e7d32; }
   .reason { font-size: 1rem; margin: 0 0 1.25rem; color: #333; }

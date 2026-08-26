@@ -49,7 +49,7 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
     evidence = await fetch_latest_adjudication_record(session, claim_id)
 
     if evidence is None:
-        raise HTTPException(status_code=404, detail=f"No adjudication record found for claim '{claim_id}'.")
+        raise HTTPException(status_code=404, detail=f"No record found for claim '{claim_id}'.")
 
     zone_id = evidence.get("input_payload", {}).get("zone_id")
     is_design_alteration = evidence.get("input_payload", {}).get("is_design_alteration", False)
