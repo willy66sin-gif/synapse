@@ -42,6 +42,34 @@ class ZoneRecord:
     active_crane: bool
 
 
+# Sensor/human dual-input precedence (2026-08-27, telemetry-ingestion-
+# pathway build): a ZoneRecord field named here may be written either
+# by a human declaration (scripts/seed_dev_data.py, the only writer
+# before this build) or by verified telemetry
+# (src/telemetry/zone_write.py's write_sensor_zone_state(), which
+# calls src/telemetry/trust.py's verify_telemetry() before writing).
+# When both exist for the same zone, the verified sensor value is
+# authoritative and the human-declared value is fallback-only --
+# src/core/repository.py's fetch_zone_record() is what applies this at
+# read time. A frozenset, not a single hardcoded "active_crane" check,
+# so a future dual-input field is a one-line addition here, not a new
+# precedence mechanism. hazard_level is deliberately absent: no sensor
+# source for it has been named by any decision to date.
+SENSOR_ELIGIBLE_ZONE_FIELDS = frozenset({"active_crane"})
+
+
+def sensor_zone_redis_key(zone_id: str) -> str:
+    """
+    Redis key for verified-telemetry-sourced zone field values,
+    distinct from the human-declared `zone:{zone_id}` hash
+    src/core/repository.py's fetch_zone_record() already reads. Pure
+    string formatting, no I/O -- both src/core/repository.py (reader)
+    and src/telemetry/zone_write.py (writer) import this single
+    definition so the two sides can never drift on the key format.
+    """
+    return f"zone:{zone_id}:sensor"
+
+
 @dataclass(frozen=True)
 class RuleOutcome:
     rule_id: str

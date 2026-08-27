@@ -8,17 +8,17 @@ a physical actuator is a distinct, not-yet-relevant problem: Maestro's
 only built output today is human notification, see
 src/maestro/adapters/base.py).
 
-No real caller wires into this today. Checked how src/core/rules.py's
-ZoneRecord actually gets populated: nothing does, automatically --
-src/core/repository.py's fetch_zone_record() only reads Redis, and the
-only thing that ever writes a zone: key is scripts/seed_dev_data.py, a
-manual, optional dev script. There is no telemetry ingestion pathway
-anywhere in this codebase for this module to protect yet. This ships
-as a real, testable, zero-data mechanism ahead of that pathway
-existing -- same "build the container, not the content" discipline as
-src/intake/models.py's IdentityCrosswalkEntry, one layer further out
-(that registry at least had a real, if blocked, caller in EptwAdapter;
-this one has none yet).
+Real caller as of the 2026-08-27 telemetry-ingestion-pathway build:
+src/telemetry/zone_write.py's write_sensor_zone_state() calls
+verify_telemetry() before writing a verified sensor value into
+src/core/rules.py's sensor-eligible ZoneRecord fields (see that
+module's SENSOR_ELIGIBLE_ZONE_FIELDS/sensor_zone_redis_key()). Before
+that build, nothing wrote a zone: key except scripts/seed_dev_data.py,
+a manual, optional dev script -- that path is unchanged and remains
+the fallback for zones with no registered sensor; this module's
+mechanism shipped ahead of that pathway existing, same "build the
+container, not the content" discipline as src/intake/models.py's
+IdentityCrosswalkEntry.
 
 Two distinct failure modes, deliberately not collapsed into one error
 type (mirrors src/intake/adapters/eptw.py's CrosswalkMissError vs.
@@ -47,17 +47,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.telemetry.repository import fetch_device_public_key
 
 # Reason code convention (src/core/rules.py: R-PTW-01, R-AUTH-01/02/03,
-# R-ZONE-01) -- R-<DOMAIN>-<NUMBER>, one per distinct failure class. Only
-# DeviceNotRegisteredError gets one here: it's a provisioning gap (device
-# never entered into DeviceRegistryEntry), a different remediation path
-# than TelemetrySignatureInvalidError's trust gap (known device, bad
-# signature -- key rotation/tamper investigation, not registry entry).
-# No evidence-emission call site exists yet for telemetry errors (see this
-# module's docstring -- there is no ingestion pathway to wire one into),
-# so this is attached to the exception itself, the same role
-# Verdict["reason_code"] plays for Core's adjudication failures, ready to
-# thread into evidence the same way once a real caller exists.
+# R-ZONE-01) -- R-<DOMAIN>-<NUMBER>, one per distinct failure class.
+# Both telemetry failure modes get their own code (2026-08-27,
+# telemetry-ingestion-pathway build -- decision: do not collapse either
+# into the other or into the "UNVERIFIED SOURCE" UX placeholder
+# string): R-DEV-01 is a provisioning gap (device never entered into
+# DeviceRegistryEntry); R-DEV-02 is a trust gap (known device, bad
+# signature -- key rotation/tamper investigation, not a registry
+# entry). Attached to each exception itself, the same role
+# Verdict["reason_code"] plays for Core's adjudication failures --
+# src/telemetry/zone_write.py's write_sensor_zone_state() is the real
+# caller these are threaded to today: both fail closed with no Redis
+# write, and (2026-08-27, telemetry-rejection-evidence addendum) both
+# now also get their own signed SensorZoneStateRejectionRecord
+# carrying this reason_code, before the exception propagates.
 REASON_CODE_DEVICE_NOT_REGISTERED = "R-DEV-01"
+REASON_CODE_TELEMETRY_SIGNATURE_INVALID = "R-DEV-02"
 
 
 class DeviceNotRegisteredError(LookupError):
@@ -68,6 +73,8 @@ class DeviceNotRegisteredError(LookupError):
 
 class TelemetrySignatureInvalidError(ValueError):
     """Device is registered, but the signature does not verify against its registered public key."""
+
+    reason_code = REASON_CODE_TELEMETRY_SIGNATURE_INVALID
 
 
 def _verify_signature(public_key_pem: str, payload: bytes, signature: bytes) -> bool:

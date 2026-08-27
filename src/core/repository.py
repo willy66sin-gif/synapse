@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.config import settings
 from src.core.models import AuthorizedIssuer, IssuerRole
 from src.core.roles import AuthorityRoleType
-from src.core.rules import IssuerRecord, ZoneRecord
+from src.core.rules import SENSOR_ELIGIBLE_ZONE_FIELDS, IssuerRecord, ZoneRecord, sensor_zone_redis_key
 
 _engine = create_async_engine(settings.database_url)
 _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
@@ -77,18 +77,46 @@ async def fetch_issuer_roles(session: AsyncSession, issuer_id: str) -> list[Auth
     return list(result.scalars().all())
 
 
+def _resolve_zone_field(field: str, sensor_data: dict, human_data: dict) -> Optional[str]:
+    """
+    Sensor/human precedence (src/core/rules.py's
+    SENSOR_ELIGIBLE_ZONE_FIELDS): the sensor-sourced value wins when
+    the field is sensor-eligible and a verified sensor has actually
+    written it; otherwise falls back to the human-declared value —
+    identical to today's behavior for any field not in that set (e.g.
+    hazard_level), and for any sensor-eligible field a sensor has never
+    written for this zone.
+    """
+    if field in SENSOR_ELIGIBLE_ZONE_FIELDS and field in sensor_data:
+        return sensor_data[field]
+    return human_data.get(field)
+
+
 async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneRecord]:
     """
     Real replacement for synapse_mdm.py's ACTIVE_ZONES lookup. Zone
-    state lives in Redis as a hash at key `zone:{zone_id}` with fields
-    `hazard_level` and `active_crane` ("true"/"false"). Returns None if
-    the zone has no state cached — the same "zone does not exist" case
-    check_zone_safety() already handles.
+    state lives in Redis as a human-declared hash at key `zone:{zone_id}`
+    with fields `hazard_level` and `active_crane` ("true"/"false") —
+    written by scripts/seed_dev_data.py — plus, as of the 2026-08-27
+    telemetry-ingestion-pathway build, an optional verified-telemetry
+    hash at src/core/rules.py's sensor_zone_redis_key(zone_id).
+
+    A zone's existence is still determined by the human-declared hash
+    alone (empty -> None, the same "zone does not exist" case
+    check_zone_safety() already handles) — a sensor has never been the
+    sole source of truth for a zone's hazard_level, which has no
+    sensor source at all. For each field in SENSOR_ELIGIBLE_ZONE_FIELDS,
+    the sensor hash's value is used when present (precedence: verified
+    sensor over human declaration); otherwise the human-declared value
+    is used, unchanged from before this build.
     """
-    data = await redis_client.hgetall(f"zone:{zone_id}")
-    if not data:
+    human_data = await redis_client.hgetall(f"zone:{zone_id}")
+    if not human_data:
         return None
+
+    sensor_data = await redis_client.hgetall(sensor_zone_redis_key(zone_id))
+
     return ZoneRecord(
-        hazard_level=data["hazard_level"],
-        active_crane=data.get("active_crane") == "true",
+        hazard_level=_resolve_zone_field("hazard_level", sensor_data, human_data),
+        active_crane=_resolve_zone_field("active_crane", sensor_data, human_data) == "true",
     )

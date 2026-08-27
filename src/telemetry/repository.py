@@ -15,7 +15,11 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.telemetry.models import DeviceRegistryEntry
+from src.telemetry.models import (
+    DeviceRegistryEntry,
+    SensorZoneStateAuditEntry,
+    SensorZoneStateRejectionAuditEntry,
+)
 
 
 async def fetch_device_public_key(session: AsyncSession, device_id: str) -> Optional[str]:
@@ -24,3 +28,37 @@ async def fetch_device_public_key(session: AsyncSession, device_id: str) -> Opti
         select(DeviceRegistryEntry.public_key).where(DeviceRegistryEntry.device_id == device_id)
     )
     return result.scalar_one_or_none()
+
+
+async def persist_sensor_zone_state_record(session: AsyncSession, evidence: dict) -> None:
+    """
+    Appends a signed SensorZoneStateRecord to its own audit trail.
+    Never updates or deletes existing rows — mirrors
+    src/evidence/repository.py's persist_adjudication_record() and
+    src/supervisor/repository.py's persist_override_record().
+    """
+    session.add(
+        SensorZoneStateAuditEntry(
+            zone_id=evidence["zone_id"],
+            device_id=evidence["device_id"],
+            record=evidence,
+        )
+    )
+    await session.commit()
+
+
+async def persist_sensor_zone_rejection_record(session: AsyncSession, evidence: dict) -> None:
+    """
+    Appends a signed SensorZoneStateRejectionRecord to its own audit
+    trail — never updates or deletes existing rows, same discipline as
+    persist_sensor_zone_state_record() above.
+    """
+    session.add(
+        SensorZoneStateRejectionAuditEntry(
+            zone_id=evidence["zone_id"],
+            device_id=evidence["device_id"],
+            reason_code=evidence["reason_code"],
+            record=evidence,
+        )
+    )
+    await session.commit()

@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from src.telemetry.trust import (
     REASON_CODE_DEVICE_NOT_REGISTERED,
+    REASON_CODE_TELEMETRY_SIGNATURE_INVALID,
     DeviceNotRegisteredError,
     TelemetrySignatureInvalidError,
     _verify_signature,
@@ -140,7 +141,10 @@ async def test_r_dev_01_fires_for_an_unregistered_device():
 @pytest.mark.asyncio
 async def test_r_dev_01_does_not_fire_for_a_registered_device_with_a_bad_signature():
     """A registered device with a bad signature is a trust gap, not a provisioning gap --
-    it must still raise TelemetrySignatureInvalidError, which carries no reason_code."""
+    it must still raise TelemetrySignatureInvalidError, carrying its own
+    distinct code (R-DEV-02, not R-DEV-01) as of the 2026-08-27
+    telemetry-ingestion-pathway build's reason-code decision -- previously
+    this exception carried no reason_code at all; that is no longer true."""
     _, public_pem = _generate_keypair()
     wrong_private_key, _ = _generate_keypair()
     payload = b'{"device_id": "DEV-TEST-01", "reading": "ok"}'
@@ -150,4 +154,14 @@ async def test_r_dev_01_does_not_fire_for_a_registered_device_with_a_bad_signatu
     with pytest.raises(TelemetrySignatureInvalidError) as exc_info:
         await verify_telemetry(session, "DEV-TEST-01", payload, signature)
 
-    assert not hasattr(exc_info.value, "reason_code")
+    assert exc_info.value.reason_code == REASON_CODE_TELEMETRY_SIGNATURE_INVALID == "R-DEV-02"
+    assert exc_info.value.reason_code != REASON_CODE_DEVICE_NOT_REGISTERED
+
+
+def test_device_not_registered_and_signature_invalid_reason_codes_are_distinct():
+    """Decision #3 (2026-08-27 telemetry-ingestion-pathway build): the
+    two already-distinct exception types must also map to distinct
+    reason codes, not share one or collapse into a single generic code."""
+    assert REASON_CODE_DEVICE_NOT_REGISTERED != REASON_CODE_TELEMETRY_SIGNATURE_INVALID
+    assert DeviceNotRegisteredError.reason_code == REASON_CODE_DEVICE_NOT_REGISTERED
+    assert TelemetrySignatureInvalidError.reason_code == REASON_CODE_TELEMETRY_SIGNATURE_INVALID
