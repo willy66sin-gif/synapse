@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from src.airlock.schemas import ClaimPayload, WorkType
 from src.core.evaluator import adjudicate
+from src.core.roles import AuthorityRoleType
 from src.core.rules import IssuerRecord, ZoneRecord
 from src.evidence.emitter import emit_evidence
 from src.maestro.schemas import OutboundAlert, RuleConditionResult
@@ -20,6 +21,11 @@ from src.maestro.schemas import OutboundAlert, RuleConditionResult
 SUPERINTENDENT = IssuerRecord(role="SUPERINTENDENT", clearance_level=3)
 LOW_HAZARD_ZONE = ZoneRecord(hazard_level="LOW", active_crane=False)
 HIGH_HAZARD_ZONE = ZoneRecord(hazard_level="HIGH", active_crane=True)
+
+# 2026-08-27, Authority Admissibility handoff: authority_check() now
+# gates on GATE_ADMISSIBLE_ROLES membership, not clearance_level --
+# SUPERINTENDENT needs RTO to reach GO / later rules in these tests.
+SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO]
 
 PASSING_RULE = RuleConditionResult(rule_id="authority_check", passed=True, reason="Authority Validated")
 FAILING_RULE = RuleConditionResult(
@@ -122,6 +128,7 @@ def test_from_evidence_record_builds_from_real_evidence_go():
         _claim(claim_payload["claim_id"], claim_payload["issuer_id"]),
         issuer_record=SUPERINTENDENT,
         zone_record=LOW_HAZARD_ZONE,
+        issuer_roles=SUPERINTENDENT_ROLES,
     )
     evidence = emit_evidence(claim_payload, verdict)
 
@@ -153,6 +160,7 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
         _claim(claim_payload["claim_id"], claim_payload["issuer_id"], zone_id="ZONE-99"),
         issuer_record=SUPERINTENDENT,
         zone_record=None,
+        issuer_roles=SUPERINTENDENT_ROLES,
     )
     evidence = emit_evidence(claim_payload, verdict)
 
@@ -181,7 +189,9 @@ def test_from_evidence_record_carries_eptw_reason_code_through():
         work_type=WorkType.EXCAVATION,
         ptw_context=None,
     )
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE)
+    verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
     evidence = emit_evidence(claim_payload, verdict)
 
     alert = OutboundAlert.from_evidence_record(evidence, zone_id="ZONE-01")

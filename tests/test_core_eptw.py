@@ -12,10 +12,17 @@ from datetime import datetime, timedelta, timezone
 
 from src.airlock.schemas import ClaimPayload, PtwContext, WorkType
 from src.core.evaluator import adjudicate
+from src.core.roles import AuthorityRoleType
 from src.core.rules import IssuerRecord, ZoneRecord, verify_ptw_precondition
 
 SUPERINTENDENT = IssuerRecord(role="SUPERINTENDENT", clearance_level=3)
 LOW_HAZARD_ZONE = ZoneRecord(hazard_level="LOW", active_crane=False)
+
+# 2026-08-27, Authority Admissibility handoff: authority_check() now
+# gates on GATE_ADMISSIBLE_ROLES membership, not clearance_level --
+# SUPERINTENDENT needs RTO to reach GO / later rules in these tests.
+SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO]
+NO_ROLES: list[AuthorityRoleType] = []
 
 NOW = datetime.now(timezone.utc)
 VALID_FROM = (NOW - timedelta(hours=1)).isoformat()
@@ -178,7 +185,7 @@ def test_adjudicate_rejects_before_authority_check_even_runs():
     """
     claim = _claim(issuer_id="USR-UNKNOWN", ptw_context=None)
 
-    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE)
+    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-PTW-01"
@@ -189,7 +196,9 @@ def test_adjudicate_rejects_before_authority_check_even_runs():
 def test_adjudicate_accepts_valid_high_risk_claim_end_to_end():
     claim = _claim()
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE)
+    verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
@@ -202,7 +211,9 @@ def test_adjudicate_nominal_civil_unaffected_by_eptw_gate():
     behave exactly as they did before the ePTW gate existed."""
     claim = _claim(work_type=WorkType.NOMINAL_CIVIL, ptw_context=None, action_type="MATERIAL_ENTRY")
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE)
+    verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
 
     assert verdict["decision"] == "GO"
     assert verdict["rule_trace"][0]["rule_id"] == "ptw_precondition_check"

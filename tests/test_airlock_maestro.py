@@ -20,30 +20,54 @@ import src.airlock.router as airlock_router
 from src.airlock.schemas import WorkType
 from src.core.models import AuthorizedIssuer
 from src.core.repository import get_db_session, get_redis_client
+from src.core.roles import AuthorityRoleType
 from src.main import app
 from src.maestro.schemas import DeliveryResult
 
 SUPERINTENDENT_ROW = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDENT", clearance_level=3)
 
+# 2026-08-27, Authority Admissibility handoff: authority_check() now
+# gates on GATE_ADMISSIBLE_ROLES membership (src/core/rules.py), not
+# clearance_level -- tests that need Rule 1 to pass now also need this
+# role list threaded through _client_with_stubs.
+SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO]
+
 VALID_LOW_HAZARD_ZONE = {"hazard_level": "LOW", "active_crane": "false"}
 
 
 class _StubResult:
-    def __init__(self, row):
+    """
+    Backs both fetch_issuer_record()'s scalar_one_or_none() query shape
+    and (2026-08-27, Authority Admissibility handoff) fetch_issuer_roles()'s
+    scalars().all() shape -- one canned result object serving both,
+    same "canned regardless of statement shape" convention this stub
+    already used before this addition, extended to a second shape now
+    that the router calls a second query.
+    """
+
+    def __init__(self, row, roles):
         self._row = row
+        self._roles = roles
 
     def scalar_one_or_none(self):
         return self._row
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._roles
+
 
 class _StubSession:
-    def __init__(self, issuer_row=None):
+    def __init__(self, issuer_row=None, issuer_roles=None):
         self._issuer_row = issuer_row
+        self._issuer_roles = issuer_roles or []
         self.added = []
         self.committed = False
 
     async def execute(self, stmt):
-        return _StubResult(self._issuer_row)
+        return _StubResult(self._issuer_row, self._issuer_roles)
 
     def add(self, obj):
         self.added.append(obj)
@@ -80,9 +104,9 @@ def maestro_calls(monkeypatch):
     return calls
 
 
-def _client_with_stubs(issuer_row=None, zone_data=None):
+def _client_with_stubs(issuer_row=None, zone_data=None, issuer_roles=None):
     async def _override_db_session():
-        yield _StubSession(issuer_row=issuer_row)
+        yield _StubSession(issuer_row=issuer_row, issuer_roles=issuer_roles)
 
     async def _override_redis_client():
         yield _StubRedis(zone_data=zone_data)
@@ -114,7 +138,9 @@ def _claim(**overrides) -> dict:
 
 
 def test_go_adjudication_triggers_no_maestro_call(maestro_calls):
-    client = _client_with_stubs(issuer_row=SUPERINTENDENT_ROW, zone_data=VALID_LOW_HAZARD_ZONE)
+    client = _client_with_stubs(
+        issuer_row=SUPERINTENDENT_ROW, zone_data=VALID_LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
 
     response = client.post("/airlock/claims", json=_claim())
 
@@ -176,7 +202,9 @@ def test_zone_safety_no_go_triggers_maestro_alert_with_reason_code(maestro_calls
     """R-ZONE-01 now resolves via its own reason_code routing entry
     (2026-08-06, Task 3), not the ("*", "*") catch-all -- see
     src/maestro/directory.py's DIRECTORY_MAP."""
-    client = _client_with_stubs(issuer_row=SUPERINTENDENT_ROW, zone_data=None)
+    client = _client_with_stubs(
+        issuer_row=SUPERINTENDENT_ROW, zone_data=None, issuer_roles=SUPERINTENDENT_ROLES
+    )
 
     response = client.post("/airlock/claims", json=_claim(claim_id="CLM-ZONE-201", zone_id="ZONE-99"))
 
@@ -249,7 +277,9 @@ def test_go_design_alteration_still_triggers_no_maestro_call(maestro_calls):
     src/frontline/router.py, src/supervisor/router.py). The persisted
     authority_binding_id also stays None on GO, unchanged from before
     this pass -- see src/airlock/router.py's own comment for why."""
-    client = _client_with_stubs(issuer_row=SUPERINTENDENT_ROW, zone_data=VALID_LOW_HAZARD_ZONE)
+    client = _client_with_stubs(
+        issuer_row=SUPERINTENDENT_ROW, zone_data=VALID_LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
 
     response = client.post(
         "/airlock/claims",

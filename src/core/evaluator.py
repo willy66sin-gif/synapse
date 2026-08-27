@@ -23,6 +23,7 @@ from dataclasses import asdict
 from typing import Optional, TypedDict
 
 from src.airlock.schemas import ClaimPayload
+from src.core.roles import AuthorityRoleType
 from src.core.rules import (
     REASON_CODE_PTW_PRECONDITION,
     REASON_CODE_ZONE_SAFETY_FAILURE,
@@ -47,6 +48,7 @@ def adjudicate(
     claim: ClaimPayload,
     issuer_record: Optional[IssuerRecord],
     zone_record: Optional[ZoneRecord],
+    issuer_roles: list[AuthorityRoleType],
 ) -> Verdict:
     """
     Evaluates a validated claim against Rule 0 (ePTW precondition),
@@ -54,6 +56,16 @@ def adjudicate(
     circuiting NO_GO on the first failed rule — same control flow as
     synapse_mdm.py's `adjudicate`, extended with the ePTW gate ahead
     of it.
+
+    issuer_roles (2026-08-27, Authority Admissibility handoff): the
+    issuer's already-fetched AuthorityRoleType list (src/core/
+    repository.py's fetch_issuer_roles()), same "already-resolved
+    record" discipline as issuer_record/zone_record — this function
+    still does no I/O and no resolution itself. Threaded into Rule 1
+    only (check_authority()/classify_authority_failure()); Rule 0 and
+    Rule 2 do not consult it — see src/core/rules.py's
+    GATE_ADMISSIBLE_ROLES for why those two gates' admissibility
+    wiring is explicitly not done in this pass.
     """
     rule_trace: list[dict] = []
 
@@ -68,7 +80,7 @@ def adjudicate(
             reason_code=REASON_CODE_PTW_PRECONDITION,
         )
 
-    authority_outcome = check_authority(claim, issuer_record)
+    authority_outcome = check_authority(claim, issuer_record, issuer_roles)
     rule_trace.append(asdict(authority_outcome))
     if not authority_outcome.passed:
         return Verdict(
@@ -82,7 +94,7 @@ def adjudicate(
             # to resolve_authority(). See classify_authority_failure()'s
             # doc comment (src/core/rules.py) for why R-AUTH-01/02/03
             # split the way they do.
-            reason_code=classify_authority_failure(claim, issuer_record),
+            reason_code=classify_authority_failure(claim, issuer_record, issuer_roles),
         )
 
     zone_outcome = check_zone_safety(claim, zone_record)

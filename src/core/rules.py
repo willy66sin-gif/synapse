@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.airlock.schemas import ClaimPayload, WorkType
+from src.core.roles import AuthorityRoleType
 
 
 @dataclass(frozen=True)
@@ -100,7 +101,37 @@ HIGH_RISK_WORK_TYPES = frozenset(
 )
 
 
-def classify_authority_failure(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) -> Optional[str]:
+# Per-gate admissible-role mapping (2026-08-27, Authority Admissibility
+# handoff -- locked decision, not reopened here). Static, code-defined,
+# mirrors src/maestro/directory.py's DIRECTORY_MAP precedent exactly:
+# no database table, no migration, a plain dict read by pure functions.
+#
+# The full locked table is recorded here for a single source of truth,
+# but only the two authority_check rows (HIGH_RISK/NOMINAL, both -> RTO)
+# are actually consulted by any code in this pass. R-ZONE-01 and
+# R-PTW-01 are recorded but NOT WIRED: check_zone_safety() and
+# verify_ptw_precondition() (below) receive no issuer_record/
+# issuer_roles parameter at all today, and adjudicate() (src/core/
+# evaluator.py) calls them without one -- there is no existing call
+# path carrying issuer role data into either. Wiring those two is a
+# structural decision this pass explicitly stopped short of making,
+# not an oversight -- see the handoff report for the full finding.
+# Design alteration (QP+QE) is deliberately absent from this table: it
+# is already implemented, but as escalation routing
+# (src/maestro/directory.py's resolve_authority()), not a Core gate --
+# out of scope for this table, which is about admissibility, not
+# escalation ownership.
+GATE_ADMISSIBLE_ROLES: dict[str, frozenset[AuthorityRoleType]] = {
+    REASON_CODE_ZONE_SAFETY_FAILURE: frozenset({AuthorityRoleType.SA}),  # NOT WIRED -- see note above
+    REASON_CODE_PTW_PRECONDITION: frozenset({AuthorityRoleType.RTO}),  # NOT WIRED -- see note above
+    REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK: frozenset({AuthorityRoleType.RTO}),
+    REASON_CODE_AUTHORITY_FAILURE_NOMINAL: frozenset({AuthorityRoleType.RTO}),
+}
+
+
+def classify_authority_failure(
+    claim: ClaimPayload, issuer_record: Optional[IssuerRecord], issuer_roles: list[AuthorityRoleType]
+) -> Optional[str]:
     """
     Single source of truth for which Rule 1 (authority_check) failure
     mode applies, if any -- returns None if the claim would pass (not
@@ -113,6 +144,20 @@ def classify_authority_failure(claim: ClaimPayload, issuer_record: Optional[Issu
     keeps the two entirely in lockstep: there is exactly one place
     this branching logic is written, not two copies that could drift.
 
+    issuer_roles (2026-08-27, Authority Admissibility handoff):
+    replaces the prior claim.authority_level < issuer_record.
+    clearance_level comparison with GATE_ADMISSIBLE_ROLES membership --
+    an already-fetched list (src/core/repository.py's
+    fetch_issuer_roles(), same "pure function only sees already-
+    fetched records" discipline as issuer_record/zone_record), checked
+    via set intersection so an issuer holding several roles (the real-
+    world precedent that motivated IssuerRole's join-table shape) is
+    handled naturally: any one admissible role present is enough,
+    holding additional roles is never a problem. claim.authority_level
+    and issuer_record.clearance_level are deliberately left unread here
+    (not deleted from their schemas -- see CLAUDE.md's Open Items on
+    the undefined clearance_level scale this replaces).
+
     What's honestly distinguishable today, and what isn't:
     - Unauthenticated issuer (issuer_record is None) stays a single,
       undifferentiated code (R-AUTH-01). This is deliberate, not an
@@ -121,14 +166,17 @@ def classify_authority_failure(claim: ClaimPayload, issuer_record: Optional[Issu
       whether the claim is excavation or material entry. Splitting
       this by claim.work_type would invent a distinction the failure
       itself doesn't actually have.
-    - Insufficient clearance (authority_level < clearance_level) DOES
-      have an honest signal available: claim.work_type, via the same
-      HIGH_RISK_WORK_TYPES distinction verify_ptw_precondition already
-      uses elsewhere in this file -- not a new taxonomy invented for
-      this purpose, the one real categorization already established in
-      this codebase. R-AUTH-02 for high-risk work_type (excavation,
-      lifting, hot work, confined space -- the same permit-requiring
-      categories Rule 0 gates on), R-AUTH-03 for nominal work.
+    - Missing the admissible role (GATE_ADMISSIBLE_ROLES membership)
+      DOES have an honest signal available: claim.work_type, via the
+      same HIGH_RISK_WORK_TYPES distinction verify_ptw_precondition
+      already uses elsewhere in this file -- not a new taxonomy
+      invented for this purpose, the one real categorization already
+      established in this codebase. R-AUTH-02 for high-risk work_type
+      (excavation, lifting, hot work, confined space -- the same
+      permit-requiring categories Rule 0 gates on), R-AUTH-03 for
+      nominal work. Both currently require the same admissible role
+      (RTO) -- the split is about which reason_code is reported, not
+      about two different admissible-role sets.
     - claim.zone_id and claim.action_type are NOT used: zone hazard
       level isn't available here at all (check_authority never
       receives zone_record -- that's check_zone_safety's job, Rule 2,
@@ -140,14 +188,21 @@ def classify_authority_failure(claim: ClaimPayload, issuer_record: Optional[Issu
     """
     if issuer_record is None:
         return REASON_CODE_AUTHORITY_FAILURE
-    if claim.authority_level < issuer_record.clearance_level:
-        return REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK if claim.work_type in HIGH_RISK_WORK_TYPES else REASON_CODE_AUTHORITY_FAILURE_NOMINAL
+
+    is_high_risk = claim.work_type in HIGH_RISK_WORK_TYPES
+    reason_code = REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK if is_high_risk else REASON_CODE_AUTHORITY_FAILURE_NOMINAL
+    admissible_roles = GATE_ADMISSIBLE_ROLES[reason_code]
+
+    if not admissible_roles.intersection(issuer_roles):
+        return reason_code
     return None
 
 
-def check_authority(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) -> RuleOutcome:
+def check_authority(
+    claim: ClaimPayload, issuer_record: Optional[IssuerRecord], issuer_roles: list[AuthorityRoleType]
+) -> RuleOutcome:
     """Rule 1: Authority Check (synapse_mdm.py `adjudicate`, Rule 1)."""
-    failure = classify_authority_failure(claim, issuer_record)
+    failure = classify_authority_failure(claim, issuer_record, issuer_roles)
 
     if failure == REASON_CODE_AUTHORITY_FAILURE:
         return RuleOutcome(
@@ -160,7 +215,10 @@ def check_authority(claim: ClaimPayload, issuer_record: Optional[IssuerRecord]) 
         return RuleOutcome(
             rule_id="authority_check",
             passed=False,
-            reason=f"Authority Failure: Level {claim.authority_level} insufficient for role.",
+            reason=(
+                f"Authority Failure: Issuer '{claim.issuer_id}' does not hold an admissible "
+                f"role ({sorted(role.value for role in GATE_ADMISSIBLE_ROLES[failure])}) for this claim."
+            ),
         )
 
     return RuleOutcome(rule_id="authority_check", passed=True, reason="Authority Validated")

@@ -34,6 +34,7 @@ from src.airlock.schemas import ClaimPayload
 from src.core.evaluator import adjudicate
 from src.core.repository import (
     fetch_issuer_record,
+    fetch_issuer_roles,
     fetch_zone_record,
     get_db_session,
     get_redis_client,
@@ -67,8 +68,14 @@ async def submit_claim(
     """
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
     zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    # 2026-08-27, Authority Admissibility handoff: fetch_issuer_roles()
+    # was already built and tested but unread until now -- resolved
+    # unconditionally, same pattern as issuer_record/zone_record above
+    # (an already-fetched record adjudicate() consults, not a second
+    # I/O boundary inside Core).
+    issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
 
-    verdict = adjudicate(claim, issuer_record, zone_record)
+    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles)
 
     authority_binding_id = None
     if verdict["decision"] == "NO_GO":
