@@ -30,7 +30,12 @@ SUPERINTENDENT_ROW = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDE
 # gates on GATE_ADMISSIBLE_ROLES membership (src/core/rules.py), not
 # clearance_level -- tests that need Rule 1 to pass now also need this
 # role list threaded through _client_with_stubs.
-SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO]
+#
+# 2026-08-28, R-ZONE-01/R-PTW-01 Admissibility handoff:
+# check_zone_safety() now also gates on GATE_ADMISSIBLE_ROLES (SA) --
+# SA added so this file's GO-path tests still reach GO through
+# zone_safety_check.
+SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
 
 VALID_LOW_HAZARD_ZONE = {"hazard_level": "LOW", "active_crane": "false"}
 

@@ -57,19 +57,19 @@ def adjudicate(
     synapse_mdm.py's `adjudicate`, extended with the ePTW gate ahead
     of it.
 
-    issuer_roles (2026-08-27, Authority Admissibility handoff): the
-    issuer's already-fetched AuthorityRoleType list (src/core/
-    repository.py's fetch_issuer_roles()), same "already-resolved
-    record" discipline as issuer_record/zone_record — this function
-    still does no I/O and no resolution itself. Threaded into Rule 1
-    only (check_authority()/classify_authority_failure()); Rule 0 and
-    Rule 2 do not consult it — see src/core/rules.py's
-    GATE_ADMISSIBLE_ROLES for why those two gates' admissibility
-    wiring is explicitly not done in this pass.
+    issuer_roles (2026-08-27, Authority Admissibility handoff; threaded
+    into Rule 0 and Rule 2 as of 2026-08-28's R-ZONE-01/R-PTW-01
+    Admissibility handoff): the issuer's already-fetched
+    AuthorityRoleType list (src/core/repository.py's
+    fetch_issuer_roles()), same "already-resolved record" discipline as
+    issuer_record/zone_record — this function still does no I/O and no
+    resolution itself. Now passed into all three rule calls below; see
+    src/core/rules.py's GATE_ADMISSIBLE_ROLES for each gate's
+    admissible-role row.
     """
     rule_trace: list[dict] = []
 
-    ptw_outcome = verify_ptw_precondition(claim)
+    ptw_outcome = verify_ptw_precondition(claim, issuer_roles)
     rule_trace.append(asdict(ptw_outcome))
     if not ptw_outcome.passed:
         return Verdict(
@@ -97,7 +97,7 @@ def adjudicate(
             reason_code=classify_authority_failure(claim, issuer_record, issuer_roles),
         )
 
-    zone_outcome = check_zone_safety(claim, zone_record)
+    zone_outcome = check_zone_safety(claim, zone_record, issuer_roles)
     rule_trace.append(asdict(zone_outcome))
     if not zone_outcome.passed:
         return Verdict(

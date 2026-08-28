@@ -17,7 +17,10 @@ testable without any database/cache side-effects.
 verify_ptw_precondition (Rule 0: ePTW Precondition Check) needs no
 externally-resolved record at all — the permit context travels inside
 the claim itself (ClaimPayload.ptw_context), submitted directly by the
-caller — so it stays pure with zero dependencies beyond the claim.
+caller. It does take issuer_roles (2026-08-28, R-ZONE-01/R-PTW-01
+Admissibility handoff), but that's the same already-fetched-list
+parameter check_authority() already takes, not a resolution this
+function performs itself — it stays pure and does zero I/O.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -106,16 +109,13 @@ HIGH_RISK_WORK_TYPES = frozenset(
 # mirrors src/maestro/directory.py's DIRECTORY_MAP precedent exactly:
 # no database table, no migration, a plain dict read by pure functions.
 #
-# The full locked table is recorded here for a single source of truth,
-# but only the two authority_check rows (HIGH_RISK/NOMINAL, both -> RTO)
-# are actually consulted by any code in this pass. R-ZONE-01 and
-# R-PTW-01 are recorded but NOT WIRED: check_zone_safety() and
-# verify_ptw_precondition() (below) receive no issuer_record/
-# issuer_roles parameter at all today, and adjudicate() (src/core/
-# evaluator.py) calls them without one -- there is no existing call
-# path carrying issuer role data into either. Wiring those two is a
-# structural decision this pass explicitly stopped short of making,
-# not an oversight -- see the handoff report for the full finding.
+# All four rows are now wired (2026-08-28, R-ZONE-01/R-PTW-01
+# Admissibility handoff): check_zone_safety() and verify_ptw_precondition()
+# (below) each take issuer_roles and consult their own row via the same
+# GATE_ADMISSIBLE_ROLES[REASON_CODE].intersection(issuer_roles) pattern
+# classify_authority_failure() established for the authority_check rows.
+# The mapping itself is unchanged from the prior pass -- only the two
+# previously-inert rows are now read.
 # Design alteration (QP+QE) is deliberately absent from this table: it
 # is already implemented, but as escalation routing
 # (src/maestro/directory.py's resolve_authority()), not a Core gate --
@@ -224,8 +224,26 @@ def check_authority(
     return RuleOutcome(rule_id="authority_check", passed=True, reason="Authority Validated")
 
 
-def check_zone_safety(claim: ClaimPayload, zone_record: Optional[ZoneRecord]) -> RuleOutcome:
-    """Rule 2: Physical Boundary & Zone Safety Check (synapse_mdm.py `adjudicate`, Rule 2)."""
+def check_zone_safety(
+    claim: ClaimPayload, zone_record: Optional[ZoneRecord], issuer_roles: list[AuthorityRoleType]
+) -> RuleOutcome:
+    """
+    Rule 2: Physical Boundary & Zone Safety Check (synapse_mdm.py
+    `adjudicate`, Rule 2).
+
+    issuer_roles (2026-08-28, R-ZONE-01/R-PTW-01 Admissibility
+    handoff): checked via GATE_ADMISSIBLE_ROLES[REASON_CODE_ZONE_SAFETY_FAILURE]
+    (SA), same intersection pattern classify_authority_failure()
+    established. Ordered after the existence check and the
+    hazard-specific lift-operation check, not before them: an
+    inadmissible-issuer failure and a physical hazard failure are both
+    genuine zone-safety violations reported under the same R-ZONE-01
+    code, and putting the pre-existing hazard check first keeps its
+    failure reason unchanged for issuers who fail both ways at once --
+    least disruption to what this rule already reported, per the
+    R-ZONE-01/R-PTW-01 handoff's "reuse, least new surface area"
+    direction.
+    """
     if zone_record is None:
         return RuleOutcome(
             rule_id="zone_safety_check",
@@ -240,10 +258,21 @@ def check_zone_safety(claim: ClaimPayload, zone_record: Optional[ZoneRecord]) ->
             reason=f"Safety Violation: Heavy lift requested in high-hazard zone '{claim.zone_id}'.",
         )
 
+    admissible_roles = GATE_ADMISSIBLE_ROLES[REASON_CODE_ZONE_SAFETY_FAILURE]
+    if not admissible_roles.intersection(issuer_roles):
+        return RuleOutcome(
+            rule_id="zone_safety_check",
+            passed=False,
+            reason=(
+                f"Safety Violation: Issuer does not hold an admissible role "
+                f"({sorted(role.value for role in admissible_roles)}) for zone '{claim.zone_id}'."
+            ),
+        )
+
     return RuleOutcome(rule_id="zone_safety_check", passed=True, reason="Zone Safety Validated")
 
 
-def verify_ptw_precondition(claim: ClaimPayload) -> RuleOutcome:
+def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRoleType]) -> RuleOutcome:
     """
     Rule 0: ePTW Precondition Check. Gatekeeper — src/core/evaluator.py
     runs this before Rule 1 (authority) and Rule 2 (zone safety).
@@ -252,6 +281,17 @@ def verify_ptw_precondition(claim: ClaimPayload) -> RuleOutcome:
     four high-risk work types requires a PtwContext that is present,
     APPROVED, within its valid window, and matching on both zone_id
     and permit_type — or the claim fails closed.
+
+    issuer_roles (2026-08-28, R-ZONE-01/R-PTW-01 Admissibility
+    handoff): checked last, after every ctx-content check above,
+    via GATE_ADMISSIBLE_ROLES[REASON_CODE_PTW_PRECONDITION] (RTO), same
+    intersection pattern classify_authority_failure() established.
+    Deliberately last, not first: this gate's existing ctx-content
+    reasons (missing/PENDING/EXPIRED/REVOKED/out-of-window/mismatched
+    permit) stay reported exactly as before for a claim that fails both
+    ways at once -- an inadmissible issuer is only reported once the
+    permit itself has already checked out, same "least disruption to
+    what already reports" choice made in check_zone_safety().
     """
     if claim.work_type not in HIGH_RISK_WORK_TYPES:
         return RuleOutcome(
@@ -313,6 +353,18 @@ def verify_ptw_precondition(claim: ClaimPayload) -> RuleOutcome:
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' type "
                 f"'{ctx.permit_type.value}' does not match claimed work_type "
                 f"'{claim.work_type.value}'."
+            ),
+        )
+
+    admissible_roles = GATE_ADMISSIBLE_ROLES[REASON_CODE_PTW_PRECONDITION]
+    if not admissible_roles.intersection(issuer_roles):
+        return RuleOutcome(
+            rule_id="ptw_precondition_check",
+            passed=False,
+            reason=(
+                f"FAIL_CLOSED_EPTW_PRECONDITION: Issuer does not hold an admissible role "
+                f"({sorted(role.value for role in admissible_roles)}) for high-risk "
+                f"work_type '{claim.work_type.value}'."
             ),
         )
 

@@ -25,7 +25,12 @@ HIGH_HAZARD_ZONE = ZoneRecord(hazard_level="HIGH", active_crane=True)
 # 2026-08-27, Authority Admissibility handoff: authority_check() now
 # gates on GATE_ADMISSIBLE_ROLES membership, not clearance_level --
 # SUPERINTENDENT needs RTO to reach GO / later rules in these tests.
-SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO]
+#
+# 2026-08-28, R-ZONE-01/R-PTW-01 Admissibility handoff:
+# check_zone_safety() now also gates on GATE_ADMISSIBLE_ROLES (SA) --
+# SA added so this file's GO-path tests still reach GO through
+# zone_safety_check.
+SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
 
 PASSING_RULE = RuleConditionResult(rule_id="authority_check", passed=True, reason="Authority Validated")
 FAILING_RULE = RuleConditionResult(
