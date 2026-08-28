@@ -35,6 +35,15 @@ class IssuerRecord:
     """Mirrors an AUTHORIZED_ISSUERS entry — sourced from PostgreSQL."""
 
     role: str
+    # DEPRECATED (2026-08-28, Legacy authority_level/clearance_level
+    # discovery pass): unread by check_authority()/classify_authority_
+    # failure() since commit 2b26af0 -- superseded by
+    # GATE_ADMISSIBLE_ROLES/IssuerRole membership (see
+    # classify_authority_failure()'s own docstring, below). Kept on
+    # this dataclass, not removed, for symmetry with
+    # ClaimPayload.authority_level (src/airlock/schemas.py) -- both
+    # went dead for the same reason on the same commit; actual removal
+    # is a separate, future decision, not made here.
     clearance_level: int
 
 

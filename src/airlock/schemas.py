@@ -90,6 +90,18 @@ class ClaimPayload(BaseModel):
     claim_id: str
     timestamp: str
     issuer_id: str
+    # DEPRECATED (2026-08-28, Legacy authority_level/clearance_level
+    # discovery pass): retained on this schema for backward API
+    # compatibility only -- not read by adjudicate()/check_authority()
+    # as of commit 2b26af0, which replaced the
+    # claim.authority_level < issuer_record.clearance_level comparison
+    # with GATE_ADMISSIBLE_ROLES/IssuerRole membership. Still
+    # mandatory and still enforced at the schema boundary (this
+    # model's extra="forbid" plus FastAPI's live /docs, /openapi.json)
+    # -- removing it would be a breaking API contract change, not
+    # internal cleanup. Three replacement options were presented for
+    # this field (2026-08-06, CLAUDE.md changelog) and none has been
+    # decided; do not remove this field until that decision is made.
     authority_level: int
     zone_id: str
     action_type: str

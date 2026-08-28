@@ -45,15 +45,23 @@ class AuthorizedIssuer(Base):
 
     issuer_id: Mapped[str] = mapped_column(primary_key=True)
     # Free-text, unconstrained, not consulted by src/core/rules.py's
-    # check_authority() today (confirmed by inspection — it only
-    # compares authority_level/clearance_level, never reads this
-    # field). Deliberately left untouched by the IssuerRole migration
-    # below: the two values that exist anywhere in this repo today
-    # ("SUPERINTENDENT", "SITE_ENGINEER") are generic job titles, not
-    # verified licensure — neither cleanly maps to AuthorityRoleType,
-    # and forcing one would fabricate a credential this repo has no
-    # basis for. See CLAUDE.md's Open Items.
+    # check_authority() today (confirmed by inspection — as of commit
+    # 2b26af0 it gates on GATE_ADMISSIBLE_ROLES/IssuerRole membership,
+    # not this field). Deliberately left untouched by the IssuerRole
+    # migration below: the two values that exist anywhere in this repo
+    # today ("SUPERINTENDENT", "SITE_ENGINEER") are generic job
+    # titles, not verified licensure — neither cleanly maps to
+    # AuthorityRoleType, and forcing one would fabricate a credential
+    # this repo has no basis for. See CLAUDE.md's Open Items.
     role: Mapped[str]
+    # DEPRECATED (2026-08-28, Legacy authority_level/clearance_level
+    # discovery pass): unread by check_authority() since commit
+    # 2b26af0 -- superseded by GATE_ADMISSIBLE_ROLES/IssuerRole
+    # membership. Kept on this table, not removed/migrated out, for
+    # symmetry with ClaimPayload.authority_level (src/airlock/schemas.py)
+    # -- both went dead for the same reason on the same commit; actual
+    # removal is a separate, future decision (would need a real
+    # migration, since this column already has live seeded rows).
     clearance_level: Mapped[int]
 
 
