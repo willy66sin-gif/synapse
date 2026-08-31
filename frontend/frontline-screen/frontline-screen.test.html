@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Frontline Screen — tests (GO Freshness Phase 1 polling, 2026-08-31)</title>
+</head>
+<body>
+  <h1>frontline-screen.js tests</h1>
+  <p>
+    Dependency-free assertion harness — no test runner, no build step, same
+    convention as frontend/blocked-screen/blocked-screen.test.html (see
+    CLAUDE.md's standing "no new frontend framework or build tooling"
+    decision). Open this file directly in a browser; results render below and
+    also print to the console. <code>#results-json</code> holds a
+    machine-readable summary for automated checks.
+  </p>
+  <div id="summary"></div>
+  <ul id="results"></ul>
+  <pre id="results-json"></pre>
+
+  <script type="module" src="./frontline-screen.js"></script>
+  <script type="module">
+    const results = [];
+
+    function assert(name, condition, detail) {
+      results.push({ name, pass: !!condition, detail: detail || "" });
+      const line = `[${condition ? "PASS" : "FAIL"}] ${name}${detail ? " — " + detail : ""}`;
+      // eslint-disable-next-line no-console
+      console[condition ? "log" : "error"](line);
+    }
+
+    function makeElement() {
+      const el = document.createElement("frontline-screen");
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function primaryInstruction(el) {
+      const p = el.shadowRoot.querySelector(".primary-instruction");
+      return p ? p.textContent.trim() : null;
+    }
+
+    // GO Freshness Phase 1 fixtures -- same shape frontline_status_json()
+    // returns (src/frontline/router.py) and the same shape the initial
+    // server-rendered page already embeds.
+    const GO = {
+      claimId: "CLM-TEST-401",
+      decision: "GO",
+      reasonCode: null,
+      reason: "",
+      workActivity: "MATERIAL_ENTRY",
+      traceId: "BIND-999",
+      assignedRole: "General Duty Officer",
+    };
+
+    const NO_GO = {
+      claimId: "CLM-TEST-401",
+      decision: "NO_GO",
+      reasonCode: "R-ZONE-01",
+      reason: "Zone ZONE-01 no longer exists.",
+      traceId: "BIND-SA-01",
+      workActivity: "MATERIAL_ENTRY",
+      assignedRole: "General Duty Officer",
+    };
+
+    // Swaps window.fetch for the duration of one test, restoring it
+    // afterwards -- so each test controls exactly what _poll()'s fetch()
+    // call resolves to, without a real network or server.
+    async function withMockFetch(responder, run) {
+      const realFetch = window.fetch;
+      window.fetch = responder;
+      try {
+        await run();
+      } finally {
+        window.fetch = realFetch;
+      }
+    }
+
+    function jsonResponse(body, ok = true) {
+      return Promise.resolve({
+        ok,
+        json: () => Promise.resolve(body),
+      });
+    }
+
+    // --- 1. Client re-renders on a changed poll response -------------------
+
+    await withMockFetch(
+      () => jsonResponse(NO_GO),
+      async () => {
+        const el = makeElement();
+        el.data = GO;
+        assert(
+          "Initial render (GO) shows 'You may proceed.'",
+          primaryInstruction(el) === "You may proceed."
+        );
+
+        await el._poll();
+
+        assert(
+          "After _poll() resolves a changed (NO_GO) response, the component re-renders via the same data setter/_render() path",
+          primaryInstruction(el) === "Do not proceed.",
+          `primary instruction after poll: "${primaryInstruction(el)}"`
+        );
+        assert(
+          "Polled data replaces this.data wholesale -- get data reflects the new payload",
+          el.data.decision === "NO_GO" && el.data.reasonCode === "R-ZONE-01"
+        );
+      }
+    );
+
+    // --- 2. A non-OK poll response leaves the last known-good render -------
+
+    await withMockFetch(
+      () => jsonResponse({ error: "boom" }, false),
+      async () => {
+        const el = makeElement();
+        el.data = GO;
+
+        await el._poll();
+
+        assert(
+          "A non-OK poll response does not change the rendered state",
+          primaryInstruction(el) === "You may proceed."
+        );
+      }
+    );
+
+    // --- 3. A network failure (rejected fetch) leaves the last known-good --
+
+    await withMockFetch(
+      () => Promise.reject(new TypeError("network down")),
+      async () => {
+        const el = makeElement();
+        el.data = GO;
+
+        await el._poll();
+
+        assert(
+          "A rejected fetch() (network failure) does not throw out of _poll() and does not change the rendered state",
+          primaryInstruction(el) === "You may proceed."
+        );
+      }
+    );
+
+    // --- 4. _ensurePolling() is idempotent ----------------------------------
+
+    (function testEnsurePollingDoesNotStackIntervals() {
+      const realSetInterval = window.setInterval;
+      let calls = 0;
+      window.setInterval = (...args) => {
+        calls += 1;
+        return realSetInterval(...args);
+      };
+      try {
+        const el = makeElement();
+        el.data = GO; // 1st data assignment -> should start exactly one interval
+        el.data = { ...GO }; // 2nd assignment (e.g. a real poll reassigning data) -> must not start a second
+        el.connectedCallback(); // re-entering the DOM must not start a second either
+        assert(
+          "Repeated data assignments / connectedCallback calls start at most one polling interval",
+          calls === 1,
+          `setInterval called ${calls} time(s)`
+        );
+        el._stopPolling();
+      } finally {
+        window.setInterval = realSetInterval;
+      }
+    })();
+
+    // --- 5. disconnectedCallback stops polling ------------------------------
+
+    (function testDisconnectedCallbackStopsPolling() {
+      const realClearInterval = window.clearInterval;
+      let cleared = 0;
+      window.clearInterval = (...args) => {
+        cleared += 1;
+        return realClearInterval(...args);
+      };
+      try {
+        const el = makeElement();
+        el.data = GO;
+        el.disconnectedCallback();
+        assert("disconnectedCallback() clears the polling interval", cleared === 1);
+        assert("disconnectedCallback() nulls out the timer handle so _ensurePolling() can restart later", el._pollTimer === null);
+      } finally {
+        window.clearInterval = realClearInterval;
+      }
+    })();
+
+    // --- Summary -------------------------------------------------------------
+
+    const failed = results.filter((r) => !r.pass);
+    document.getElementById("summary").textContent = `${results.length - failed.length}/${results.length} passed`;
+    document.getElementById("results").innerHTML = results
+      .map((r) => `<li style="color:${r.pass ? "green" : "red"}">[${r.pass ? "PASS" : "FAIL"}] ${r.name}${r.detail ? " — " + r.detail : ""}</li>`)
+      .join("");
+    document.getElementById("results-json").textContent = JSON.stringify(
+      { total: results.length, passed: results.length - failed.length, failed: failed.map((r) => r.name) },
+      null,
+      2
+    );
+    // eslint-disable-next-line no-console
+    console.log(`${results.length - failed.length}/${results.length} passed`);
+  </script>
+</body>
+</html>

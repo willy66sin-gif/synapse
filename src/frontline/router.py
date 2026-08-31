@@ -33,9 +33,18 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.repository import get_db_session
+from src.airlock.schemas import ClaimPayload
+from src.core.evaluator import adjudicate
+from src.core.repository import (
+    fetch_issuer_record,
+    fetch_issuer_roles,
+    fetch_zone_record,
+    get_db_session,
+    get_redis_client,
+)
 from src.evidence.repository import fetch_latest_adjudication_record
 from src.maestro.directory import resolve_authority
 
@@ -74,6 +83,74 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
     return HTMLResponse(_render_frontline_screen_page(frontline_screen_data))
 
 
+@router.get("/blocked/{claim_id}/status")
+async def frontline_status_json(
+    claim_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    redis_client: Redis = Depends(get_redis_client),
+) -> dict:
+    """
+    GO Freshness Phase 1 (2026-08-31, Willy-authorized, scoped to
+    permit-context/zone fields only -- see CLAUDE.md's GO Freshness
+    Principle decision, 2026-08-28). JSON counterpart to
+    GET /frontline/blocked/{claim_id}, meant to be polled by
+    frontend/frontline-screen/frontline-screen.js after its initial
+    server-rendered page load.
+
+    Deliberately does NOT just re-read the last persisted evidence row
+    -- that would only change if a *new* claim got submitted, and would
+    never notice a permit or zone state that changed since this claim
+    was originally adjudicated, which is exactly the gap Phase 1 closes.
+    Instead this re-runs the actual evaluation path fresh, every call:
+    reconstructs the original ClaimPayload from the persisted
+    evidence's input_payload (claim_id, timestamp, ptw_context, zone_id
+    etc. don't change poll-to-poll), then re-fetches issuer/zone state
+    and calls src/core/evaluator.py's adjudicate() again -- the exact
+    same Core entrypoint, same fetch_issuer_record/fetch_zone_record/
+    fetch_issuer_roles calls, src/airlock/router.py's POST
+    /airlock/claims already uses for a first-time submission. No rule
+    logic is duplicated here.
+
+    404 if the claim was never adjudicated -- same as the HTML route.
+
+    Explicitly does NOT persist anything or call emit_evidence(): a
+    poll-detected state change (e.g. GO -> NO_GO) is rendered but never
+    written to the audit trail. Whether it should get its own signed
+    evidence record is a real, separate, not-yet-decided question (see
+    this pass's own scoping doc) -- deliberately left open here, not
+    silently decided either way.
+
+    The response shape matches frontline_screen_data above exactly, so
+    the client's `data` setter can consume this response the same way
+    it already consumes the server-rendered initial payload -- no
+    client-side branching on which one it received.
+    """
+    evidence = await fetch_latest_adjudication_record(session, claim_id)
+
+    if evidence is None:
+        raise HTTPException(status_code=404, detail=f"No record found for claim '{claim_id}'.")
+
+    claim = ClaimPayload(**evidence["input_payload"])
+
+    issuer_record = await fetch_issuer_record(session, claim.issuer_id)
+    zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
+
+    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles)
+
+    bindings = resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
+
+    return {
+        "claimId": verdict["claim_id"],
+        "decision": verdict["decision"],
+        "reasonCode": verdict["reason_code"],
+        "reason": _frontline_reason(verdict),
+        "workActivity": claim.action_type,
+        "traceId": ", ".join(binding.binding_id for binding in bindings),
+        "assignedRole": ", ".join(binding.role for binding in bindings),
+    }
+
+
 def _frontline_reason(evidence: dict) -> str:
     """
     Plain-language reason for a frontline worker: the specific failing
@@ -83,6 +160,14 @@ def _frontline_reason(evidence: dict) -> str:
     -- CLAUDE.md's Stage 2 Frontline Worker Contract explicitly
     excludes rule internals from this screen. Empty on GO, where there
     is nothing to explain.
+
+    Takes `dict` (not the narrower Verdict TypedDict) because both
+    callers pass it a persisted evidence record: frontline_status_screen()
+    passes a full AdjudicationRecord dict, and frontline_status_json()
+    (GO Freshness Phase 1) passes a freshly-computed Verdict -- both
+    happen to share the "decision"/"rule_trace"/"reason" keys this
+    function actually reads, so one implementation serves both without
+    a second, near-duplicate reason-extraction function.
     """
     if evidence["decision"] != "NO_GO":
         return ""

@@ -44,11 +44,14 @@
  *   "assertive" for NO_GO. This mirrors blocked-screen.js's own locked
  *   reasoning and CLAUDE.md's Stage 2 Frontline Worker Contract ("role=alert
  *   used only where appropriate for dynamic critical state changes -- not
- *   as a default"): assertive/alert semantics are for an already-rendered
- *   screen changing state, and this component has no such transition --
- *   data is set once, server-side, on page load. There is no "first
- *   render vs. later render" distinction here for alert semantics to
- *   apply to; every render is the only render.
+ *   as a default"). Originally justified by "data is set once, server-side,
+ *   on page load -- no first render vs. later render distinction exists" --
+ *   that premise no longer holds as of GO Freshness Phase 1 (2026-08-31)
+ *   below, which does re-render on later poll responses. The "polite" (not
+ *   "assertive") choice itself is unchanged and was NOT re-decided by that
+ *   pass -- whether a poll-detected GO->NO_GO transition warrants different
+ *   alert semantics than the initial render is an open question, deliberately
+ *   left open, not silently resolved either way.
  * - Reflow: no fixed-width elements; .screen uses max-width with rem
  *   padding, verified live at 320px viewport width with no horizontal
  *   scrollbar (see @media rule below for the tightest breakpoint).
@@ -61,11 +64,13 @@ class FrontlineScreen extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._data = null;
+    this._pollTimer = null;
   }
 
   set data(value) {
     this._data = value;
     this._render();
+    this._ensurePolling();
   }
 
   get data() {
@@ -74,6 +79,47 @@ class FrontlineScreen extends HTMLElement {
 
   connectedCallback() {
     this._render();
+    this._ensurePolling();
+  }
+
+  disconnectedCallback() {
+    this._stopPolling();
+  }
+
+  // GO Freshness Phase 1 (2026-08-31, Willy-authorized). Polling, not
+  // push -- see src/frontline/router.py's frontline_status_json() doc
+  // comment for why. Starts once claimId is known (from either the
+  // server-rendered initial payload or a prior poll response) and is
+  // idempotent -- safe to call from both the data setter and
+  // connectedCallback without spawning a second interval.
+  _ensurePolling() {
+    if (this._pollTimer || !this._data || !this._data.claimId) return;
+    this._pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
+  }
+
+  _stopPolling() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+  }
+
+  // Reassigns `this.data` on a successful response so the exact same
+  // setter/_render() path handles a polled update as handles the
+  // initial server-rendered payload -- no separate render path, no
+  // per-field inspection of what changed. A network failure or non-OK
+  // response leaves the last known-good render on screen and retries
+  // on the next tick; it is not surfaced as an error state (out of
+  // this pass's scope).
+  async _poll() {
+    if (!this._data || !this._data.claimId) return;
+    try {
+      const response = await fetch(`/frontline/blocked/${encodeURIComponent(this._data.claimId)}/status`);
+      if (!response.ok) return;
+      this.data = await response.json();
+    } catch {
+      // Network hiccup: keep showing the last known-good state.
+    }
   }
 
   _render() {
@@ -115,6 +161,14 @@ class FrontlineScreen extends HTMLElement {
 // to keep in sync.
 const ICON_CLEARED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l5 5L19 7"/></svg>`;
 const ICON_BLOCKED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18"/></svg>`;
+
+// GO Freshness Phase 1 (2026-08-31): PLACEHOLDER value, not a locked
+// decision. No poll interval has been chosen yet -- this is the one
+// place to change it once Willy confirms a real number. The tradeoff
+// it sets is bounded worst-case staleness (a GO/NO_GO shown to a
+// worker can be this far out of date) vs. poll traffic; see this
+// pass's own scoping doc.
+const POLL_INTERVAL_MS = 5000;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
