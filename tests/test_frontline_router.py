@@ -28,6 +28,8 @@ from src.core.repository import get_db_session, get_redis_client
 from src.core.roles import AuthorityRoleType
 from src.evidence.models import AdjudicationAuditEntry
 from src.main import app
+from src.profiles.models import CertifiedProfileRecord
+from src.profiles.schemas import ProfileLineage
 
 NO_GO_EVIDENCE = {
     "claim_id": "CLM-EPTW-301",
@@ -260,12 +262,20 @@ class _StatusStubSession:
     for the full scenario this models.
     """
 
-    def __init__(self, evidence_row=None, issuer_row=None, issuer_roles=None, stale_override=None):
+    def __init__(
+        self, evidence_row=None, issuer_row=None, issuer_roles=None, stale_override=None, profile_row=None
+    ):
         self._evidence_row = evidence_row
         self._issuer_row = issuer_row
         self._issuer_roles = issuer_roles or []
         self._stale_override = stale_override  # {"query_index": int, "evidence": dict}
         self._adjudication_queries = 0
+        # GO Freshness Phase 3a, Part B: tracks every CertifiedProfileRecord
+        # query separately, same "count calls so a test can prove fresh-
+        # every-time, not cached" role _adjudication_queries already plays
+        # for the concurrency test above.
+        self._profile_row = profile_row
+        self.profile_queries = 0
         self.added = []
         self.committed = 0
 
@@ -281,6 +291,9 @@ class _StatusStubSession:
             return _StatusStubResult(self._issuer_row)
         if entity is IssuerRole:
             return _StatusStubResult(self._issuer_roles)
+        if entity is CertifiedProfileRecord:
+            self.profile_queries += 1
+            return _StatusStubResult(self._profile_row)
         raise AssertionError(f"frontline_status_json() issued an unexpected query: {stmt}")
 
     def add(self, obj):
@@ -547,3 +560,65 @@ def test_status_endpoint_response_shape_matches_html_embedded_payload():
         "traceId",
         "assignedRole",
     }
+
+
+# --- GO Freshness Phase 3a, Part B: CertifiedProfile fetched fresh every poll ---
+
+STALE_GO_EVIDENCE_WITH_PROFILE = {
+    **STALE_GO_EVIDENCE,
+    "input_payload": {**STALE_GO_EVIDENCE["input_payload"], "profile_id": "SG-BC-2024"},
+}
+
+VALID_PROFILE_ROW = CertifiedProfileRecord(
+    profile_id="SG-BC-2024",
+    jurisdiction_code="SG",
+    version="2024.1",
+    lineage=ProfileLineage.STANDALONE,
+    base_profile_id=None,
+    base_profile_version=None,
+    parameters={},
+)
+
+
+def test_status_endpoint_fetches_profile_fresh_on_every_poll_not_cached():
+    """Part B's honest scope: nothing in src/core/rules.py currently
+    gates on the resolved profile (confirmed in this pass's own
+    investigation -- adjudicate() accepts it but no rule reads it), so
+    there is no observable verdict difference to assert here, and
+    fabricating one would mean inventing a rule this pass wasn't
+    authorized to invent. What IS verifiable, and is exactly what "no
+    caching, always re-run for real" means for this parameter: the
+    CertifiedProfileRecord query fires once per poll, not once total --
+    three polls, three profile queries, mirroring how
+    test_status_endpoint_re_evaluates_on_every_call_not_cached already
+    proves the same property for issuer/zone."""
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(STALE_GO_EVIDENCE_WITH_PROFILE),
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+        profile_row=VALID_PROFILE_ROW,
+    )
+    client = _status_client(zone_data=VALID_LOW_HAZARD_ZONE, session=session)
+
+    for expected_query_count in (1, 2, 3):
+        response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+        assert response.status_code == 200
+        assert session.profile_queries == expected_query_count
+
+
+def test_status_endpoint_does_not_query_profile_when_claim_has_no_profile_id():
+    """The common case today: a claim with no profile_id (the default)
+    must not trigger a CertifiedProfileRecord query at all -- mirrors
+    fetch_certified_profile() only ever being called conditionally in
+    both src/frontline/router.py and src/airlock/router.py."""
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(STALE_GO_EVIDENCE),  # no profile_id in input_payload
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+    )
+    client = _status_client(zone_data=VALID_LOW_HAZARD_ZONE, session=session)
+
+    response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+
+    assert response.status_code == 200
+    assert session.profile_queries == 0

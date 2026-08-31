@@ -26,11 +26,20 @@ signing. OutboundAlert.from_evidence_record() resolves authority again
 internally for the alert's fields — a second call to the same pure,
 deterministic lookup, not a second decision; see its docstring.
 """
-from fastapi import APIRouter, Depends
+from dataclasses import asdict
+
+from fastapi import APIRouter, Depends, HTTPException
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.airlock.profile_check import (
+    ProfileIdMissingError,
+    ProfileIdUnresolvableError,
+    check_profile_requirement,
+)
+from src.airlock.repository import persist_profile_rejection_record
 from src.airlock.schemas import ClaimPayload
+from src.config import settings
 from src.core.evaluator import adjudicate
 from src.core.repository import (
     fetch_issuer_record,
@@ -39,12 +48,13 @@ from src.core.repository import (
     get_db_session,
     get_redis_client,
 )
-from src.evidence.emitter import emit_evidence
+from src.evidence.emitter import emit_evidence, emit_profile_rejection_evidence
 from src.evidence.repository import persist_adjudication_record
 from src.maestro.adapters.telegram import TelegramAdapter
 from src.maestro.adapters.whatsapp import WhatsAppAdapter
 from src.maestro.directory import resolve_authority
 from src.maestro.schemas import OutboundAlert
+from src.profiles.repository import fetch_certified_profile
 
 router = APIRouter(prefix="/airlock", tags=["airlock"])
 
@@ -59,13 +69,44 @@ async def submit_claim(
     FastAPI + Pydantic v2 already enforce fail-closed behavior here:
     a malformed body is rejected before this function body runs.
 
-    Wires the full pipeline: fetch issuer/zone state -> adjudicate
-    (pure) -> resolve escalation authority (NO_GO only) -> emit signed
-    evidence record (carrying that resolved authority_binding_id) ->
-    persist it, so a subsequent admin-override request has something
-    real to check "does this claim exist" against -> on NO_GO only,
-    notify Maestro.
+    GO Freshness Phase 3a, Part A (2026-08-31): the profile_id
+    requirement check runs first, before any issuer/zone I/O or
+    adjudicate() call -- Airlock is upstream of Core, so a claim that's
+    about to be rejected for a missing/unresolvable profile_id (only
+    possible when settings.profile_id_enforcement_enabled is True)
+    never wastefully reaches Core at all. See
+    src/airlock/profile_check.py's module docstring for the full
+    grace-period design. When the claim proceeds (either because
+    enforcement is off, or because profile_id resolved), the resulting
+    ProfileCheckOutcome is appended to Verdict.rule_trace below --
+    reusing adjudicate()'s existing rule_trace shape for this note
+    rather than adding a new top-level field to the evidence record,
+    and deliberately NOT extending adjudicate()'s own signature/pure
+    logic to do this itself (that's GO Freshness Phase 3a Part B's
+    separate, not-yet-authorized-at-the-time-of-this-comment scope).
+
+    Wires the full pipeline: profile_id check -> fetch issuer/zone
+    state -> adjudicate (pure) -> resolve escalation authority (NO_GO
+    only) -> emit signed evidence record (carrying that resolved
+    authority_binding_id) -> persist it, so a subsequent admin-override
+    request has something real to check "does this claim exist"
+    against -> on NO_GO only, notify Maestro.
     """
+    profile = None
+    if claim.profile_id is not None:
+        profile = await fetch_certified_profile(session, claim.profile_id)
+
+    try:
+        profile_outcome = check_profile_requirement(
+            claim.profile_id, profile, settings.profile_id_enforcement_enabled
+        )
+    except (ProfileIdMissingError, ProfileIdUnresolvableError) as exc:
+        rejection_evidence = emit_profile_rejection_evidence(claim.claim_id, claim.profile_id, exc.reason_code)
+        await persist_profile_rejection_record(session, rejection_evidence)
+        raise HTTPException(
+            status_code=422, detail={"reason_code": exc.reason_code, "message": str(exc)}
+        ) from exc
+
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
     zone_record = await fetch_zone_record(redis_client, claim.zone_id)
     # 2026-08-27, Authority Admissibility handoff: fetch_issuer_roles()
@@ -75,7 +116,19 @@ async def submit_claim(
     # I/O boundary inside Core).
     issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
 
-    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles)
+    # GO Freshness Phase 3a, Part B (2026-08-31): `profile` was already
+    # resolved above (Part A's profile_id check needed it regardless of
+    # enforcement state) -- threaded straight into adjudicate() here for
+    # consistency with src/frontline/router.py's poll path, which now
+    # also fetches and passes one. Free: no second fetch, no new I/O
+    # boundary. None in the same cases frontline_status_json() would
+    # also see None (no profile_id submitted, or an unresolvable one
+    # during the grace period) -- adjudicate() treats None exactly as
+    # it did before Part B existed.
+    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, profile)
+    # GO Freshness Phase 3a, Part A: appended here, not inside
+    # adjudicate() -- see this function's own docstring above.
+    verdict["rule_trace"].append(asdict(profile_outcome))
 
     authority_binding_id = None
     if verdict["decision"] == "NO_GO":

@@ -12,7 +12,7 @@ import hashlib
 import json
 
 from src.core.evaluator import Verdict
-from src.evidence.emitter import emit_evidence, emit_override_evidence
+from src.evidence.emitter import emit_evidence, emit_override_evidence, emit_profile_rejection_evidence
 
 CLAIM_PAYLOAD = {"claim_id": "test-1", "issuer_id": "USR-SUP-01"}
 VERDICT: Verdict = {
@@ -109,6 +109,52 @@ def test_override_evidence_does_not_mutate_original_adjudication_record():
     original_snapshot = dict(original)
 
     emit_override_evidence(OVERRIDE)
+
+    assert original == original_snapshot
+
+
+# --- GO Freshness Phase 3a, Part A: emit_profile_rejection_evidence() ---
+
+
+def test_emit_profile_rejection_evidence_produces_signature():
+    result = emit_profile_rejection_evidence("CLM-501", "SG-BC-2024", "R-PROFILE-02")
+
+    assert "sha256_signature" in result
+    assert len(result["sha256_signature"]) == 64
+
+
+def test_emit_profile_rejection_evidence_signature_matches_recomputed_hash():
+    result = emit_profile_rejection_evidence("CLM-501", "SG-BC-2024", "R-PROFILE-02")
+
+    unsigned = {k: v for k, v in result.items() if k != "sha256_signature"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert result["sha256_signature"] == expected
+
+
+def test_emit_profile_rejection_evidence_is_a_distinct_record_type():
+    result = emit_profile_rejection_evidence("CLM-501", "SG-BC-2024", "R-PROFILE-02")
+
+    assert result["type"] == "ProfileRejectionRecord"
+    assert result["type"] not in ("AdjudicationRecord", "OverrideRecord")
+
+
+def test_emit_profile_rejection_evidence_records_null_profile_id_when_missing():
+    """R-PROFILE-01 (missing profile_id): profile_id is recorded as None,
+    not omitted or coerced to an empty string -- distinguishes "never
+    supplied" from "supplied but unresolvable" (R-PROFILE-02) purely by
+    this field, same record type either way."""
+    result = emit_profile_rejection_evidence("CLM-501", None, "R-PROFILE-01")
+
+    assert result["profile_id"] is None
+    assert result["reason_code"] == "R-PROFILE-01"
+
+
+def test_emit_profile_rejection_evidence_does_not_mutate_original_adjudication_record():
+    original = emit_evidence(CLAIM_PAYLOAD, VERDICT)
+    original_snapshot = dict(original)
+
+    emit_profile_rejection_evidence("CLM-501", "SG-BC-2024", "R-PROFILE-02")
 
     assert original == original_snapshot
 

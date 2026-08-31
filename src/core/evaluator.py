@@ -34,6 +34,7 @@ from src.core.rules import (
     classify_authority_failure,
     verify_ptw_precondition,
 )
+from src.profiles.schemas import CertifiedProfile
 
 
 class Verdict(TypedDict):
@@ -49,6 +50,7 @@ def adjudicate(
     issuer_record: Optional[IssuerRecord],
     zone_record: Optional[ZoneRecord],
     issuer_roles: list[AuthorityRoleType],
+    certified_profile: Optional[CertifiedProfile] = None,
 ) -> Verdict:
     """
     Evaluates a validated claim against Rule 0 (ePTW precondition),
@@ -66,6 +68,26 @@ def adjudicate(
     resolution itself. Now passed into all three rule calls below; see
     src/core/rules.py's GATE_ADMISSIBLE_ROLES for each gate's
     admissible-role row.
+
+    certified_profile (2026-08-31, GO Freshness Phase 3a Part B; the
+    already-resolved CertifiedProfile from src/profiles/repository.py's
+    fetch_certified_profile(), same "already-resolved record"
+    discipline as issuer_record/zone_record/issuer_roles above --
+    Optional and defaulted to None so every existing caller of this
+    function keeps working unchanged). Honest limitation, stated
+    plainly rather than overstated: nothing in src/core/rules.py reads
+    this parameter yet -- Rule 0/1/2 above are entirely unchanged by
+    its presence, and passing None here (as every caller predating this
+    pass still does) produces byte-identical behavior to before this
+    pass. This wires the plumbing (fresh-fetched profile reaching
+    Core, exactly like issuer/zone already do) without fabricating a
+    rule for it to gate, per this pass's own explicit scope -- inventing
+    a profile-parameter-driven rule was not authorized here. A future
+    pass that gives a real rule a profile-scoped parameter to check
+    (via src/core/profile_resolution.py's resolve_effective_parameters(),
+    already built and tested but still uncalled from any production
+    path) is what would actually change adjudication behavior; this one
+    does not.
     """
     rule_trace: list[dict] = []
 

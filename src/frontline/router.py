@@ -48,6 +48,7 @@ from src.core.repository import (
 from src.evidence.emitter import emit_evidence
 from src.evidence.repository import fetch_latest_adjudication_record, persist_adjudication_record
 from src.maestro.directory import resolve_authority
+from src.profiles.repository import fetch_certified_profile
 
 router = APIRouter(prefix="/frontline", tags=["frontline"])
 
@@ -104,13 +105,15 @@ async def frontline_status_json(
     was originally adjudicated, which is exactly the gap Phase 1 closes.
     Instead this re-runs the actual evaluation path fresh, every call:
     reconstructs the original ClaimPayload from the persisted
-    evidence's input_payload (claim_id, timestamp, ptw_context, zone_id
-    etc. don't change poll-to-poll), then re-fetches issuer/zone state
-    and calls src/core/evaluator.py's adjudicate() again -- the exact
-    same Core entrypoint, same fetch_issuer_record/fetch_zone_record/
-    fetch_issuer_roles calls, src/airlock/router.py's POST
-    /airlock/claims already uses for a first-time submission. No rule
-    logic is duplicated here.
+    evidence's input_payload (claim_id, timestamp, ptw_context, zone_id,
+    profile_id etc. don't change poll-to-poll), then re-fetches
+    issuer/zone/profile state and calls src/core/evaluator.py's
+    adjudicate() again -- the exact same Core entrypoint, same
+    fetch_issuer_record/fetch_zone_record/fetch_issuer_roles calls
+    src/airlock/router.py's POST /airlock/claims already uses for a
+    first-time submission, plus (2026-08-31, GO Freshness Phase 3a Part
+    B) the same fetch_certified_profile() call that router now also
+    makes. No rule logic is duplicated here.
 
     404 if the claim was never adjudicated -- same as the HTML route.
 
@@ -159,8 +162,19 @@ async def frontline_status_json(
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
     zone_record = await fetch_zone_record(redis_client, claim.zone_id)
     issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
+    # GO Freshness Phase 3a, Part B (2026-08-31): same fresh-every-call
+    # pattern as the three fetches above -- None when the claim has no
+    # profile_id at all (still the common case; see
+    # src/airlock/profile_check.py's grace-period design), otherwise
+    # re-resolved from src/profiles/ on every poll, never cached from
+    # the original evidence. adjudicate() accepts this parameter but
+    # (honestly, not overstated) does not yet gate anything on it --
+    # see adjudicate()'s own docstring for why.
+    certified_profile = None
+    if claim.profile_id is not None:
+        certified_profile = await fetch_certified_profile(session, claim.profile_id)
 
-    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles)
+    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, certified_profile)
 
     if _verdict_transitioned(verdict, evidence):
         # Re-check immediately before writing -- see this function's own

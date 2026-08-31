@@ -159,6 +159,46 @@ def emit_sensor_zone_rejection_evidence(
     return record
 
 
+def emit_profile_rejection_evidence(claim_id: str, profile_id: Optional[str], reason_code: str) -> dict:
+    """
+    GO Freshness Phase 3a, Part A (2026-08-31): signs a rejected
+    profile_id requirement check as its own distinct record type, via
+    the same SHA-256/JSON-LD mechanism as the other emit_*() functions
+    in this module -- mirrors emit_sensor_zone_rejection_evidence()'s
+    shape exactly, same reasoning: this fires at src/airlock/router.py
+    BEFORE src/core/evaluator.py's adjudicate() ever runs (see
+    src/airlock/profile_check.py's module docstring), so there is no
+    Verdict/AdjudicationRecord for this rejection to live inside --
+    folding it into AdjudicationAuditEntry would misrepresent a claim
+    that never reached Core as one Core actually adjudicated. Its own
+    record type, its own audit table (src/airlock/models.py's
+    ProfileRejectionAuditEntry), same "distinct evidence types live in
+    distinct tables" convention as AdjudicationAuditEntry vs.
+    OverrideAuditEntry vs. SensorZoneStateRejectionAuditEntry.
+
+    profile_id is recorded as submitted (None when the claim omitted
+    it entirely, a string when it was supplied but didn't resolve) --
+    both of src/airlock/profile_check.py's two failure branches share
+    this one emitter, distinguished only by reason_code and by whether
+    profile_id is null, mirroring how emit_sensor_zone_rejection_evidence()
+    records attempted_value regardless of which of its two failure
+    modes actually happened.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "ProfileRejectionRecord",
+        "claim_id": claim_id,
+        "profile_id": profile_id,
+        "reason_code": reason_code,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
 def emit_override_evidence(override: dict) -> dict:
     """
     Signs an admin-override event as its own distinct record type,

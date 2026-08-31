@@ -117,6 +117,18 @@ class ClaimPayload(BaseModel):
     # zone_id/action_type already use) to route to QP/QE.
     is_design_alteration: bool = False
     alteration_description: Optional[str] = None
+    # GO Freshness Phase 3a (2026-08-31, Willy-authorized), design
+    # decision #1: Optional[str] = None PERMANENTLY -- this must never
+    # become a hard-required Pydantic field, even once enforcement is
+    # switched on. "Required" is an application-level rule gated on
+    # src/config.py's Settings.profile_id_enforcement_enabled, checked
+    # at src/airlock/router.py (see src/airlock/profile_check.py), not
+    # a schema-level constraint -- avoids a second breaking schema
+    # migration once enforcement flips on. While the flag is off, a
+    # claim that DOES supply profile_id still gets it resolved and
+    # validated (see profile_check.py) -- early adopters aren't
+    # penalized for sending it ahead of enforcement.
+    profile_id: Optional[str] = None
 
     @model_validator(mode="after")
     def _alteration_description_matches_flag(self) -> "ClaimPayload":
