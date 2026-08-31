@@ -45,7 +45,8 @@ from src.core.repository import (
     get_db_session,
     get_redis_client,
 )
-from src.evidence.repository import fetch_latest_adjudication_record
+from src.evidence.emitter import emit_evidence
+from src.evidence.repository import fetch_latest_adjudication_record, persist_adjudication_record
 from src.maestro.directory import resolve_authority
 
 router = APIRouter(prefix="/frontline", tags=["frontline"])
@@ -113,17 +114,40 @@ async def frontline_status_json(
 
     404 if the claim was never adjudicated -- same as the HTML route.
 
-    Explicitly does NOT persist anything or call emit_evidence(): a
-    poll-detected state change (e.g. GO -> NO_GO) is rendered but never
-    written to the audit trail. Whether it should get its own signed
-    evidence record is a real, separate, not-yet-decided question (see
-    this pass's own scoping doc) -- deliberately left open here, not
-    silently decided either way.
+    Read/write boundary (GO Freshness Phase 1b, Part A, 2026-08-31 --
+    supersedes Phase 1's "no persistence, no emit_evidence()" design,
+    which left this an open question rather than deciding it): this
+    endpoint is now CONDITIONALLY read-write, not purely read-only.
+    Every call still re-evaluates fresh (unchanged). After evaluating,
+    it compares the fresh verdict's (decision, reason_code) against the
+    most recently persisted evidence for this claim -- if and only if
+    they differ (_verdict_transitioned()), this poll just detected a
+    fail-closed gate genuinely firing (or clearing), and gets the same
+    treatment as any other adjudication: emit_evidence() +
+    persist_adjudication_record(), the exact same functions/entrypoint
+    src/airlock/router.py's POST /airlock/claims already uses, not a
+    parallel emission path. An unchanged poll result touches the
+    evidence store not at all -- no read-modify-write, no row locked,
+    nothing -- so "poll every N seconds forever" does not mean "write
+    every N seconds forever."
+
+    Concurrency note: immediately before writing, this re-fetches the
+    latest persisted evidence a second time and re-checks the same
+    (decision, reason_code) comparison, narrowing the window where two
+    overlapping polls could both observe the same transition and both
+    write. This is a best-effort re-check, NOT a hard guarantee -- no
+    unique constraint, row lock, or other concurrency primitive exists
+    anywhere in this codebase's evidence-write path (checked: none of
+    src/evidence/models.py, src/core/models.py, src/telemetry/models.py
+    declare one), and inventing one was explicitly out of scope for
+    this pass. A true guarantee would need a DB-level uniqueness
+    constraint or SELECT ... FOR UPDATE, neither of which exists today.
 
     The response shape matches frontline_screen_data above exactly, so
     the client's `data` setter can consume this response the same way
     it already consumes the server-rendered initial payload -- no
-    client-side branching on which one it received.
+    client-side branching on which one it received. This is entirely
+    independent of whether this call happened to write evidence.
     """
     evidence = await fetch_latest_adjudication_record(session, claim_id)
 
@@ -138,6 +162,23 @@ async def frontline_status_json(
 
     verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles)
 
+    if _verdict_transitioned(verdict, evidence):
+        # Re-check immediately before writing -- see this function's own
+        # docstring's Concurrency note for exactly what this does and
+        # does not guarantee.
+        latest_at_write_time = await fetch_latest_adjudication_record(session, claim_id)
+        if _verdict_transitioned(verdict, latest_at_write_time):
+            transition_authority_binding_id = None
+            if verdict["decision"] == "NO_GO":
+                transition_authority_binding_id = [
+                    binding.binding_id
+                    for binding in resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
+                ]
+            transition_evidence = emit_evidence(
+                claim.model_dump(mode="json"), verdict, authority_binding_id=transition_authority_binding_id
+            )
+            await persist_adjudication_record(session, transition_evidence)
+
     bindings = resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
 
     return {
@@ -149,6 +190,21 @@ async def frontline_status_json(
         "traceId": ", ".join(binding.binding_id for binding in bindings),
         "assignedRole": ", ".join(binding.role for binding in bindings),
     }
+
+
+def _verdict_transitioned(verdict: dict, evidence: dict) -> bool:
+    """
+    GO Freshness Phase 1b (2026-08-31), Part A: true if `verdict`
+    genuinely differs from the previously persisted `evidence` on the
+    parts that define what was actually decided -- decision or
+    reason_code. Mirrors frontend/blocked-screen/blocked-screen.js's own
+    "isRealVerdictChange" definition (see its class doc comment / `data`
+    setter) -- the established precedent in this codebase for what
+    counts as a real verdict change worth reacting to, vs. cosmetic
+    noise (e.g. `reason`'s free-text wording, `rule_trace` detail,
+    `evaluated_at` timestamps -- none of those alone make this true).
+    """
+    return verdict["decision"] != evidence["decision"] or verdict["reason_code"] != evidence.get("reason_code")
 
 
 def _frontline_reason(evidence: dict) -> str:

@@ -238,15 +238,45 @@ class _StatusStubResult:
 
 
 class _StatusStubSession:
-    def __init__(self, evidence_row=None, issuer_row=None, issuer_roles=None):
+    """
+    GO Freshness Phase 1b (2026-08-31), Part A: this session is now
+    genuinely read-write (frontline_status_json() conditionally
+    persists a transition-triggered evidence record -- see its
+    docstring's Read/write boundary note), so unlike Phase 1's version
+    of this stub (which raised on add()/commit() to prove the endpoint
+    never touched the evidence store at all), this one records every
+    write in `self.added`/`self.committed` so tests can assert exactly
+    how many records got persisted -- zero for an unchanged poll,
+    exactly one for a genuine transition.
+
+    `stale_override` (Part A item 3's concurrency test only): forces
+    the Nth AdjudicationAuditEntry-entity query (1-based, counting only
+    that entity) to return a fixed evidence dict regardless of what has
+    since been added -- used to deterministically simulate "this
+    request's *initial* read happened before another request's write
+    landed, but its *re-check-before-write* query sees the live store,
+    which by then already has that other write." See
+    test_status_endpoint_concurrent_polls_write_evidence_only_once()
+    for the full scenario this models.
+    """
+
+    def __init__(self, evidence_row=None, issuer_row=None, issuer_roles=None, stale_override=None):
         self._evidence_row = evidence_row
         self._issuer_row = issuer_row
         self._issuer_roles = issuer_roles or []
+        self._stale_override = stale_override  # {"query_index": int, "evidence": dict}
+        self._adjudication_queries = 0
+        self.added = []
+        self.committed = 0
 
     async def execute(self, stmt):
         entity = stmt.column_descriptions[0]["entity"]
         if entity is AdjudicationAuditEntry:
-            return _StatusStubResult(self._evidence_row)
+            self._adjudication_queries += 1
+            if self._stale_override and self._adjudication_queries == self._stale_override["query_index"]:
+                return _StatusStubResult(_evidence_row(self._stale_override["evidence"]))
+            latest = self.added[-1] if self.added else self._evidence_row
+            return _StatusStubResult(latest)
         if entity is AuthorizedIssuer:
             return _StatusStubResult(self._issuer_row)
         if entity is IssuerRole:
@@ -254,13 +284,10 @@ class _StatusStubSession:
         raise AssertionError(f"frontline_status_json() issued an unexpected query: {stmt}")
 
     def add(self, obj):
-        raise AssertionError(
-            "frontline_status_json() must never persist -- GO Freshness Phase 1 explicitly "
-            "does not emit evidence for a poll-detected change (see its own docstring)."
-        )
+        self.added.append(obj)
 
     async def commit(self):
-        raise AssertionError("frontline_status_json() must never commit -- see add() above.")
+        self.committed += 1
 
 
 class _StatusStubRedis:
@@ -281,9 +308,21 @@ class _StatusStubRedis:
         return self._zone_data or {}
 
 
-def _status_client(evidence_row=None, issuer_row=None, issuer_roles=None, zone_data=None):
+def _status_client(evidence_row=None, issuer_row=None, issuer_roles=None, zone_data=None, session=None):
+    """
+    `session`: pass an already-constructed _StatusStubSession to reuse
+    across multiple client.get() calls (so a second/third call sees the
+    first call's writes via the shared session's `added` list, same as
+    real requests sharing one database) -- used by the transition/
+    concurrency tests below. Omit it (the common case) to get a fresh
+    session built from evidence_row/issuer_row/issuer_roles.
+    """
+    db_session = session or _StatusStubSession(
+        evidence_row=evidence_row, issuer_row=issuer_row, issuer_roles=issuer_roles
+    )
+
     async def _override_db_session():
-        yield _StatusStubSession(evidence_row=evidence_row, issuer_row=issuer_row, issuer_roles=issuer_roles)
+        yield db_session
 
     async def _override_redis_client():
         yield _StatusStubRedis(zone_data=zone_data)
@@ -345,25 +384,135 @@ def test_status_endpoint_re_evaluates_on_every_call_not_cached():
     assert second.json()["decision"] == "NO_GO"
 
 
-def test_status_endpoint_go_to_no_go_transition_writes_no_evidence():
-    """Explicit coverage for GO Freshness Phase 1 item 4: a poll-
-    detected GO -> NO_GO transition must render without writing any
-    new evidence record. _StatusStubSession.add()/.commit() raise if
-    called at all, so this test fails loudly if that boundary is
-    ever crossed."""
-    client = _status_client(
+# --- GO Freshness Phase 1b, Part A: transition-only evidence emission ---
+#
+# STALE_GO_EVIDENCE's persisted decision is GO. NO_GO_TRANSITION_EVIDENCE
+# below is the persisted state to start a NO_GO -> GO transition from.
+
+NO_GO_TRANSITION_EVIDENCE = {
+    "claim_id": "CLM-FRESH-401",
+    "decision": "NO_GO",
+    "reason": "Zone ZONE-01 no longer exists.",
+    "reason_code": "R-ZONE-01",
+    "authority_binding_id": ["BIND-SA-01"],
+    "rule_trace": [{"rule_id": "zone_safety_check", "passed": False, "reason": "Zone ZONE-01 no longer exists."}],
+    "evaluated_at": "2026-08-30T09:05:00+00:00",
+    "input_payload": STALE_GO_EVIDENCE["input_payload"],
+    "sha256_signature": "irrelevant-for-this-test",
+}
+
+
+def test_status_endpoint_unchanged_poll_writes_no_evidence_across_repeated_calls():
+    """Same verdict as last known, three separate polls in a row -- zero
+    evidence records written across all of them. This is the property
+    most likely to regress silently if the transition-comparison logic
+    is ever loosened, so it's asserted explicitly (added/committed counts),
+    not just inferred from the response body."""
+    session = _StatusStubSession(
         evidence_row=_evidence_row(STALE_GO_EVIDENCE),
         issuer_row=SUPERINTENDENT_ROW,
         issuer_roles=SUPERINTENDENT_ROLES,
-        zone_data=None,  # -> NO_GO
     )
+    client = _status_client(zone_data=VALID_LOW_HAZARD_ZONE, session=session)  # stays GO every time
+
+    for _ in range(3):
+        response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+        assert response.json()["decision"] == "GO"
+
+    assert session.added == []
+    assert session.committed == 0
+
+
+def test_status_endpoint_go_to_no_go_transition_writes_exactly_one_evidence_record():
+    """A poll-detected GO -> NO_GO transition must write exactly one new
+    evidence record, reflecting the new verdict and reason code -- Part A's
+    locked decision, superseding Phase 1's original 'no persistence' design."""
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(STALE_GO_EVIDENCE),
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+    )
+    client = _status_client(zone_data=None, session=session)  # zone gone -> NO_GO / R-ZONE-01
 
     response = client.get("/frontline/blocked/CLM-FRESH-401/status")
 
     assert response.status_code == 200
     assert response.json()["decision"] == "NO_GO"
-    # No AssertionError raised by the stub session's add()/commit() ==
-    # neither was called == no evidence was persisted.
+    assert response.json()["reasonCode"] == "R-ZONE-01"
+
+    assert len(session.added) == 1
+    assert session.committed == 1
+    written = session.added[0].record
+    assert written["claim_id"] == "CLM-FRESH-401"
+    assert written["decision"] == "NO_GO"
+    assert written["reason_code"] == "R-ZONE-01"
+    assert written["type"] == "AdjudicationRecord"
+
+
+def test_status_endpoint_no_go_to_go_transition_writes_exactly_one_evidence_record():
+    """A poll-detected NO_GO -> GO transition must also get its own
+    signed evidence record -- the locked decision applies symmetrically,
+    not just to the GO -> NO_GO direction."""
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(NO_GO_TRANSITION_EVIDENCE),
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+    )
+    client = _status_client(zone_data=VALID_LOW_HAZARD_ZONE, session=session)  # zone restored -> GO
+
+    response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "GO"
+
+    assert len(session.added) == 1
+    assert session.committed == 1
+    written = session.added[0].record
+    assert written["decision"] == "GO"
+    assert written["reason_code"] is None
+
+
+def test_status_endpoint_concurrent_polls_write_evidence_only_once():
+    """
+    Part A item 3's required concurrency coverage. Models two overlapping
+    polls both observing the same stale persisted GO before either has
+    written: "Task A" runs to completion first (sees stale GO, computes
+    NO_GO, its own re-check-before-write still sees stale GO since
+    nothing has written yet, writes once). "Task B" then runs against the
+    SAME shared session/store, but its *initial* read is forced (via
+    stale_override, targeting the 3rd AdjudicationAuditEntry-entity query
+    overall -- queries 1-2 were Task A's initial-read and re-check) back
+    to that same pre-write stale GO snapshot, simulating that it read
+    before Task A's write landed. Task B's own re-check-before-write
+    query is NOT overridden, so it hits the live, shared store -- which
+    by then already holds Task A's write -- and must therefore skip its
+    own write.
+
+    This is a deterministic simulation of the race (built from the
+    documented double-check mechanism itself), not a timing-dependent
+    real-concurrency test -- see frontline_status_json()'s own docstring
+    Concurrency note for why no true hard guarantee exists here.
+    """
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(STALE_GO_EVIDENCE),
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+        stale_override={"query_index": 3, "evidence": STALE_GO_EVIDENCE},
+    )
+    client = _status_client(zone_data=None, session=session)  # zone gone -> NO_GO for both tasks
+
+    task_a_response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+    assert task_a_response.json()["decision"] == "NO_GO"
+    assert len(session.added) == 1  # Task A wrote once
+
+    task_b_response = client.get("/frontline/blocked/CLM-FRESH-401/status")
+    assert task_b_response.json()["decision"] == "NO_GO"
+
+    assert len(session.added) == 1, (
+        "Task B's re-check-before-write must have observed Task A's already-landed "
+        "write and skipped its own -- exactly one evidence record total, not two."
+    )
+    assert session.committed == 1
 
 
 def test_status_endpoint_returns_404_for_unknown_claim():

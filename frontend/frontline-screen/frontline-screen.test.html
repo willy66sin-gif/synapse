@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Frontline Screen — tests (GO Freshness Phase 1 polling, 2026-08-31)</title>
+  <title>Frontline Screen — tests (GO Freshness Phase 1/1b, 2026-08-31)</title>
 </head>
 <body>
   <h1>frontline-screen.js tests</h1>
@@ -38,6 +38,10 @@
     function primaryInstruction(el) {
       const p = el.shadowRoot.querySelector(".primary-instruction");
       return p ? p.textContent.trim() : null;
+    }
+
+    function screenSection(el) {
+      return el.shadowRoot.querySelector("section.screen");
     }
 
     // GO Freshness Phase 1 fixtures -- same shape frontline_status_json()
@@ -187,6 +191,69 @@
         window.clearInterval = realClearInterval;
       }
     })();
+
+    // --- 6. GO Freshness Phase 1b, Part B: asymmetric alert/status roles ---
+    // for poll-triggered transitions only. Ported from blocked-screen.js's
+    // own locked "isRealVerdictChange" reasoning -- see the class doc
+    // comment's 2026-08-31 addendum for the quoted original text.
+
+    (function testInitialServerRenderNeverUsesAlert() {
+      const el = makeElement();
+      el.data = GO; // simulates the server-rendered inline <script> assignment
+      assert(
+        "Initial (first) data assignment never uses role=alert, even though this is the only assignment so far",
+        screenSection(el).getAttribute("role") === "status" && screenSection(el).getAttribute("aria-live") === "polite"
+      );
+    })();
+
+    await withMockFetch(
+      () => jsonResponse(NO_GO),
+      async () => {
+        const el = makeElement();
+        el.data = GO;
+        await el._poll();
+        assert(
+          "A poll-detected GO -> NO_GO transition renders role=alert / aria-live=assertive",
+          screenSection(el).getAttribute("role") === "alert" && screenSection(el).getAttribute("aria-live") === "assertive"
+        );
+      }
+    );
+
+    await withMockFetch(
+      () => jsonResponse(GO),
+      async () => {
+        const el = makeElement();
+        el.data = NO_GO; // first assignment -> still role=status despite being NO_GO (first-render rule)
+        assert(
+          "Sanity check: first assignment of NO_GO data is still role=status (first-render rule, unaffected by Part B)",
+          screenSection(el).getAttribute("role") === "status"
+        );
+        await el._poll(); // NO_GO -> GO transition
+        assert(
+          "A poll-detected NO_GO -> GO transition renders role=status / aria-live=polite (no elevated-risk case for interrupting)",
+          screenSection(el).getAttribute("role") === "status" && screenSection(el).getAttribute("aria-live") === "polite"
+        );
+      }
+    );
+
+    await withMockFetch(
+      () => jsonResponse(NO_GO),
+      async () => {
+        const el = makeElement();
+        el.data = GO;
+        await el._poll(); // GO -> NO_GO: real transition -> role becomes "alert"
+        const roleAfterTransition = screenSection(el).getAttribute("role");
+
+        await el._poll(); // same NO_GO fetched again: no verdict change
+        const roleAfterUnchangedPoll = screenSection(el).getAttribute("role");
+
+        assert(
+          "A poll response with no verdict change leaves role unchanged from whatever was already rendered (no re-announcement of an unchanged state)",
+          roleAfterTransition === "alert" && roleAfterUnchangedPoll === "alert",
+          `role after transition: ${roleAfterTransition}, role after unchanged poll: ${roleAfterUnchangedPoll}`
+        );
+      }
+    );
 
     // --- Summary -------------------------------------------------------------
 

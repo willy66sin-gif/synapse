@@ -40,18 +40,27 @@
  *   backgrounds -- a real failure, not a style preference -- darkened to
  *   #666 (5.02:1/5.17:1) while keeping it visually lightest/smallest/last,
  *   so it still reads as reference-only, never competing with the decision.
- * - role="status" / aria-live="polite" on every render, deliberately not
- *   "assertive" for NO_GO. This mirrors blocked-screen.js's own locked
- *   reasoning and CLAUDE.md's Stage 2 Frontline Worker Contract ("role=alert
- *   used only where appropriate for dynamic critical state changes -- not
- *   as a default"). Originally justified by "data is set once, server-side,
- *   on page load -- no first render vs. later render distinction exists" --
- *   that premise no longer holds as of GO Freshness Phase 1 (2026-08-31)
- *   below, which does re-render on later poll responses. The "polite" (not
- *   "assertive") choice itself is unchanged and was NOT re-decided by that
- *   pass -- whether a poll-detected GO->NO_GO transition warrants different
- *   alert semantics than the initial render is an open question, deliberately
- *   left open, not silently resolved either way.
+ * - role/aria-live (2026-08-31, GO Freshness Phase 1b, Part B): the open
+ *   question left by Phase 1 above is now resolved, asymmetrically, for the
+ *   poll-triggered re-render path only. Ported from blocked-screen.js's own
+ *   locked reasoning (quoted verbatim -- see that file's class doc comment):
+ *   "role="alert" is reserved for a genuinely critical, dynamic change: an
+ *   already-rendered verdict changing (decision or reason_code) to land on
+ *   NO_GO. It is never applied on first render (nothing has "changed" yet
+ *   at first paint) and never for a GO/cleared result." Applied here as:
+ *   a poll-detected GO -> NO_GO transition renders with role="alert" /
+ *   aria-live="assertive" (treated the same as blocked-screen.js's real-time
+ *   hazard broadcast handling -- a worker may be mid-decision or about to
+ *   act; an interrupting signal is justified); a poll-detected NO_GO -> GO
+ *   transition renders role="status"/aria-live="polite" (no elevated-risk
+ *   case for interrupting); an unchanged poll result leaves whatever
+ *   role/live is already in effect untouched (see the `data` setter below --
+ *   it only recomputes on a genuine transition), so an unchanged tick never
+ *   flips an already-alerting region back down and never re-announces a
+ *   state that hasn't changed. The initial server-rendered page load is
+ *   unaffected: first render always has no previous data to compare
+ *   against, so it keeps the constructor's status/polite default exactly as
+ *   it did before this pass.
  * - Reflow: no fixed-width elements; .screen uses max-width with rem
  *   padding, verified live at 320px viewport width with no horizontal
  *   scrollbar (see @media rule below for the tightest breakpoint).
@@ -65,9 +74,28 @@ class FrontlineScreen extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = null;
     this._pollTimer = null;
+    this._regionRole = "status";
+    this._regionLive = "polite";
   }
 
   set data(value) {
+    const previousData = this._data;
+    const nextData = value;
+
+    const isRealVerdictChange =
+      previousData != null &&
+      nextData != null &&
+      (previousData.decision !== nextData.decision || previousData.reasonCode !== nextData.reasonCode);
+
+    // Only recompute role/live on a genuine transition -- see the
+    // class doc comment's 2026-08-31 addendum for why an unchanged
+    // poll result must leave whatever is already in effect untouched.
+    if (isRealVerdictChange) {
+      const isDynamicNoGoTransition = nextData.decision === "NO_GO";
+      this._regionRole = isDynamicNoGoTransition ? "alert" : "status";
+      this._regionLive = isDynamicNoGoTransition ? "assertive" : "polite";
+    }
+
     this._data = value;
     this._render();
     this._ensurePolling();
@@ -133,7 +161,7 @@ class FrontlineScreen extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>${STYLE}</style>
-      <section class="screen ${isBlocked ? "blocked" : "cleared"}" role="status" aria-live="polite">
+      <section class="screen ${isBlocked ? "blocked" : "cleared"}" role="${this._regionRole}" aria-live="${this._regionLive}">
         ${data.workActivity ? `<div class="work-activity">${escapeHtml(data.workActivity)}</div>` : ""}
 
         <p class="primary-instruction">${isBlocked ? ICON_BLOCKED : ICON_CLEARED}${isBlocked ? "Do not proceed." : "You may proceed."}</p>
@@ -162,13 +190,15 @@ class FrontlineScreen extends HTMLElement {
 const ICON_CLEARED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 13l5 5L19 7"/></svg>`;
 const ICON_BLOCKED = `<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18"/></svg>`;
 
-// GO Freshness Phase 1 (2026-08-31): PLACEHOLDER value, not a locked
-// decision. No poll interval has been chosen yet -- this is the one
-// place to change it once Willy confirms a real number. The tradeoff
-// it sets is bounded worst-case staleness (a GO/NO_GO shown to a
-// worker can be this far out of date) vs. poll traffic; see this
-// pass's own scoping doc.
-const POLL_INTERVAL_MS = 5000;
+// GO Freshness Phase 1b, Part C (2026-08-31): STILL PROVISIONAL, not a
+// locked decision -- raised from Phase 1's 5000ms placeholder to
+// 15000ms reflecting Willy's own reasoning (the staleness bound should
+// be shorter than a typical work-decision window, not shorter than a
+// human blink), but NOT yet checked against Ivan Lim's practitioner
+// experience with actual site connectivity and live dashboard polling
+// behavior. Kept as the one named constant to change again once that
+// input comes in -- do not treat 15000 as settled.
+const POLL_INTERVAL_MS = 15000;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
