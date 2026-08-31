@@ -70,10 +70,20 @@ class IssuerRole(Base):
     One row per (issuer_id, role_type). An issuer may hold zero, one,
     or several roles simultaneously, each its own row — there is no
     single "the" role for an issuer here, unlike AuthorizedIssuer.role
-    above. Not yet populated with any real data (see this module's own
-    doc comment) and not yet read by src/core/rules.py or
-    src/core/evaluator.py — see CLAUDE.md's Open Items for why wiring
-    this into check_authority() is a separate, not-yet-decided task.
+    above.
+
+    Stale-comment correction (2026-08-31, Minimum Viable Local
+    Packaging pass): this docstring previously said "not yet populated
+    with any real data and not yet read by src/core/rules.py or
+    src/core/evaluator.py" — no longer true as of the 2026-08-27
+    Authority Admissibility handoff (commit 2b26af0 onward).
+    src/core/repository.py's fetch_issuer_roles() reads this table, and
+    src/core/rules.py's check_authority()/check_zone_safety()/
+    verify_ptw_precondition() all gate admissibility on membership here
+    via GATE_ADMISSIBLE_ROLES — see that dict's own doc comment.
+    scripts/seed_dev_data.py seeds real rows here for the dev/demo
+    issuer as of this pass, for exactly this reason: without at least
+    one admissible role, that issuer fails Rule 1 on every claim.
     """
 
     __tablename__ = "issuer_roles"
