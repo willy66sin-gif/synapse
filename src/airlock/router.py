@@ -39,6 +39,7 @@ from src.airlock.profile_check import (
 )
 from src.airlock.repository import persist_profile_rejection_record
 from src.airlock.schemas import ClaimPayload
+from src.billing.service import on_claim_finalized
 from src.config import settings
 from src.core.evaluator import adjudicate
 from src.core.repository import (
@@ -150,6 +151,26 @@ async def submit_claim(
 
     evidence = emit_evidence(claim.model_dump(mode="json"), verdict, authority_binding_id=authority_binding_id)
     await persist_adjudication_record(session, evidence)
+
+    # Hamilton Labs statement-of-accounts, event trigger (2026-09-01):
+    # this is exactly "a relevant claim-outcome record finalizes" --
+    # right after the AdjudicationRecord above is durably persisted.
+    # No-ops (returns None, no evidence emitted) unless a billing
+    # period has actually elapsed -- see src/billing/service.py's
+    # is_period_due(). Broad except deliberately: CLAUDE.md's "Core
+    # decides, Maestro delivers" boundary means this fail-closed
+    # adjudication endpoint's availability must never depend on the
+    # billing subsystem's health (a slow/unreachable DB or SMTP
+    # relay must not turn into a failed claim submission) -- every
+    # internal billing failure mode (missing SMTP config, an SMTP
+    # error) is already caught inside generate_and_send_if_due() and
+    # turned into its own evidence record; this outer catch is only
+    # for something failing before that, e.g. the billing query
+    # infrastructure itself being unavailable.
+    try:
+        await on_claim_finalized(session)
+    except Exception as exc:  # noqa: BLE001 - infra boundary, see comment above
+        print(f"Billing statement event trigger failed: {exc}")
 
     if verdict["decision"] == "NO_GO":
         alert = OutboundAlert.from_evidence_record(evidence, zone_id=claim.zone_id)

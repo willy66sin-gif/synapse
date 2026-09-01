@@ -34,6 +34,12 @@ additive: it has no way to modify, replace, or remove an existing
 AdjudicationRecord — the two record types coexist in the audit trail,
 linked only by claim_id.
 
+emit_billing_statement_evidence() (2026-09-01, Hamilton Labs
+statement-of-accounts) signs a fifth, distinct record type for a
+billing-statement send attempt — success or failure alike, per that
+build's "every send gets its own evidence record" requirement. See its
+own docstring below.
+
 emit_sensor_zone_state_evidence() (2026-08-27, telemetry-ingestion-
 pathway build) signs a third, distinct record type for a verified-
 telemetry ZoneRecord write (src/telemetry/zone_write.py). Per that
@@ -190,6 +196,42 @@ def emit_profile_rejection_evidence(claim_id: str, profile_id: Optional[str], re
         "claim_id": claim_id,
         "profile_id": profile_id,
         "reason_code": reason_code,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_billing_statement_evidence(statement: dict, delivered: bool, detail: str) -> dict:
+    """
+    Signs a billing-statement send attempt (success or failure) as its
+    own distinct record type, via the same SHA-256/JSON-LD mechanism as
+    the other emit_*() functions in this module (Hamilton Labs
+    statement-of-accounts, 2026-09-01).
+
+    "Every send gets its own signed evidence record... including
+    failed-send attempts": delivered=False records a genuinely
+    attempted, genuinely failed send (an SMTP error, or a missing
+    config value caught before ever dialing out) -- never a silently
+    skipped one. See src/billing/email_sender.py's fail-closed
+    BillingConfigIncompleteError and src/billing/service.py's
+    generate_and_send_if_due() for the two cases that produce
+    delivered=False here.
+
+    statement is the plain dict (BillingStatement.model_dump(mode="json")),
+    not the pydantic type itself, so this module stays decoupled from
+    src/billing/ exactly as it already stays decoupled from
+    src/maestro/ and src/supervisor/.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "BillingStatementRecord",
+        "statement": statement,
+        "delivered": delivered,
+        "detail": detail,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 

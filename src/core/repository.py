@@ -36,6 +36,21 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+def new_session() -> AsyncSession:
+    """
+    Creates a new scoped session for callers outside FastAPI's
+    request/dependency-injection cycle. Added for
+    src/billing/scheduler.py (Hamilton Labs statement-of-accounts,
+    2026-09-01) — a standalone process, not a request handler, so it
+    has no route to receive get_db_session() via Depends(). Same
+    session factory/engine as get_db_session() above; the only
+    difference is the caller is expected to open it itself via
+    `async with new_session() as session:` rather than FastAPI doing
+    so per-request.
+    """
+    return _session_factory()
+
+
 async def get_redis_client() -> AsyncIterator[Redis]:
     """FastAPI dependency: yields the shared async Redis client."""
     global _redis_client

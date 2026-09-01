@@ -37,6 +37,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.airlock.schemas import ClaimPayload
+from src.billing.service import on_claim_finalized
 from src.core.evaluator import adjudicate
 from src.core.repository import (
     fetch_issuer_record,
@@ -192,6 +193,18 @@ async def frontline_status_json(
                 claim.model_dump(mode="json"), verdict, authority_binding_id=transition_authority_binding_id
             )
             await persist_adjudication_record(session, transition_evidence)
+            # Hamilton Labs statement-of-accounts, event trigger
+            # (2026-09-01): a poll-detected verdict transition is also
+            # "a relevant claim-outcome record finalizing" -- same
+            # no-op-unless-due call as src/airlock/router.py's
+            # submit_claim(), see src/billing/service.py's
+            # is_period_due(). Same broad-except boundary rationale as
+            # that call site: this polling endpoint's own availability
+            # must not depend on the billing subsystem's health.
+            try:
+                await on_claim_finalized(session)
+            except Exception as exc:  # noqa: BLE001 - infra boundary, see comment above
+                print(f"Billing statement event trigger failed: {exc}")
 
     bindings = resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
 

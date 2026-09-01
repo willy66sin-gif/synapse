@@ -10,6 +10,25 @@ services:
       - db
       - cache
 
+  # Hamilton Labs statement-of-accounts, scheduled trigger (2026-09-01):
+  # src/billing/scheduler.py's standalone poll loop, kept as its own
+  # container rather than a FastAPI background task -- see that
+  # module's own docstring for why. SMTP_HOST/SMTP_PORT/
+  # BILLING_STATEMENT_SENDER/BILLING_STATEMENT_RECIPIENT are left unset
+  # here deliberately: src/billing/email_sender.py fails closed
+  # (BillingConfigIncompleteError) until Willy actually configures
+  # them, same as every other credential in this file -- never
+  # hardcoded here or anywhere else.
+  billing-scheduler:
+    build: .
+    command: python -m src.billing.scheduler
+    environment:
+      DATABASE_URL: postgresql+asyncpg://synapse:synapse@db:5432/synapse
+      REDIS_URL: redis://cache:6379/0
+    depends_on:
+      - db
+      - cache
+
   db:
     image: postgres:16
     environment:

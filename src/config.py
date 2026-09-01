@@ -3,6 +3,8 @@ Environment & connection configuration.
 
 No hardcoded credentials. Load from environment variables / .env at runtime.
 """
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +26,34 @@ class Settings(BaseSettings):
     # "context-bound, not time-bound" precedent. See
     # src/airlock/profile_check.py for what changes when this flips.
     profile_id_enforcement_enabled: bool = False
+
+    # Hamilton Labs statement-of-accounts billing module (2026-09-01):
+    # SMTP credentials and the recipient address are configuration
+    # only, same "no hardcoded credentials" rule this file already
+    # states at the top -- never a literal string anywhere in
+    # src/billing/. No defaults on any of these (None, not a fake
+    # placeholder) so src/billing/email_sender.py's fail-closed check
+    # has something real to detect: "not configured" must raise, never
+    # silently skip the send or silently report success with nothing
+    # sent. smtp_username/smtp_password stay Optional even once the
+    # others are set -- some SMTP relays genuinely require no auth,
+    # so treating an unauthenticated relay as "misconfigured" would be
+    # wrong, not fail-closed.
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_use_tls: bool = True
+    billing_statement_sender: Optional[str] = None
+    billing_statement_recipient: Optional[str] = None
+    # Billing-period cadence in days -- configurable per this pass's
+    # own instruction ("make the cadence configurable, not
+    # hardcoded"), same env-var-driven Settings-field pattern as
+    # profile_id_enforcement_enabled above. Consulted by
+    # src/billing/service.py's is_period_due(); 30 is a reasonable
+    # default (a calendar-month-ish billing period), not a hardcoded
+    # constant baked into the logic itself.
+    billing_statement_cadence_days: int = 30
 
 
 settings = Settings()

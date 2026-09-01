@@ -11,11 +11,12 @@ start, not just the first.
 
 SQLAlchemy only registers a table on Base.metadata when its model
 class has actually been imported somewhere — so every models.py in
-the app (src/core/models.py, src/airlock/models.py, src/doctrine/models.py,
-src/evidence/models.py, src/supervisor/models.py, src/intake/models.py,
-src/telemetry/models.py, src/profiles/models.py, src/ifc_sg/models.py)
-must be imported here, even though none of their classes are
-referenced directly below, or their tables silently never get created.
+the app (src/core/models.py, src/airlock/models.py, src/billing/models.py,
+src/doctrine/models.py, src/evidence/models.py, src/supervisor/models.py,
+src/intake/models.py, src/telemetry/models.py, src/profiles/models.py,
+src/ifc_sg/models.py) must be imported here, even though none of their
+classes are referenced directly below, or their tables silently never
+get created.
 
 This is schema *creation*, not a migration tool. Deliberate choice for
 this project's stage: no production data, no schema-evolution history,
@@ -36,6 +37,7 @@ import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.airlock import models as _airlock_models  # noqa: F401 - imported for its table-registration side effect
+from src.billing import models as _billing_models  # noqa: F401 - imported for its table-registration side effect
 from src.config import settings
 from src.core.models import Base
 from src.doctrine import models as _doctrine_models  # noqa: F401 - imported for its table-registration side effect

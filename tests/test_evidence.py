@@ -12,7 +12,12 @@ import hashlib
 import json
 
 from src.core.evaluator import Verdict
-from src.evidence.emitter import emit_evidence, emit_override_evidence, emit_profile_rejection_evidence
+from src.evidence.emitter import (
+    emit_billing_statement_evidence,
+    emit_evidence,
+    emit_override_evidence,
+    emit_profile_rejection_evidence,
+)
 
 CLAIM_PAYLOAD = {"claim_id": "test-1", "issuer_id": "USR-SUP-01"}
 VERDICT: Verdict = {
@@ -202,6 +207,68 @@ def test_emit_evidence_persists_provided_authority_binding_id():
     result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT, authority_binding_id="BIND-999")
 
     assert result["authority_binding_id"] == "BIND-999"
+
+
+# --- Hamilton Labs statement-of-accounts (2026-09-01): emit_billing_statement_evidence() ---
+
+BILLING_STATEMENT = {
+    "period_start": "2026-08-01T00:00:00+00:00",
+    "period_end": "2026-09-01T00:00:00+00:00",
+    "recipient": "ops@hamiltonlabs.example.com",
+    "claims_processed": 10,
+    "go_count": 8,
+    "no_go_count": 2,
+    "no_go_rate": 0.2,
+    "no_go_breakdown_by_reason_code": {"R-PTW-01": 2},
+    "generated_at": "2026-09-01T00:00:05+00:00",
+}
+
+
+def test_emit_billing_statement_evidence_produces_signature():
+    result = emit_billing_statement_evidence(BILLING_STATEMENT, delivered=True, detail="Sent.")
+
+    assert "sha256_signature" in result
+    assert len(result["sha256_signature"]) == 64
+
+
+def test_emit_billing_statement_evidence_signature_matches_recomputed_hash():
+    result = emit_billing_statement_evidence(BILLING_STATEMENT, delivered=True, detail="Sent.")
+
+    unsigned = {k: v for k, v in result.items() if k != "sha256_signature"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert result["sha256_signature"] == expected
+
+
+def test_emit_billing_statement_evidence_is_a_distinct_record_type():
+    result = emit_billing_statement_evidence(BILLING_STATEMENT, delivered=True, detail="Sent.")
+
+    assert result["type"] == "BillingStatementRecord"
+    assert result["type"] not in ("AdjudicationRecord", "OverrideRecord", "ProfileRejectionRecord")
+
+
+def test_emit_billing_statement_evidence_records_failed_sends_not_just_successes():
+    """'every send... including failed-send attempts' -- delivered=False
+    must be a real, distinguishable value on the signed record, not
+    coerced to True or omitted."""
+    result = emit_billing_statement_evidence(
+        BILLING_STATEMENT, delivered=False, detail="SMTP send failed: relay refused the message"
+    )
+
+    assert result["delivered"] is False
+    assert "relay refused" in result["detail"]
+
+
+def test_emit_billing_statement_evidence_tampering_invalidates_signature():
+    result = emit_billing_statement_evidence(BILLING_STATEMENT, delivered=True, detail="Sent.")
+
+    tampered = dict(result)
+    tampered["delivered"] = False
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]
 
 
 def test_emit_evidence_authority_binding_id_is_included_in_the_signed_payload():
