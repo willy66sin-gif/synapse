@@ -10,6 +10,10 @@ re-derives its own copy from rule_trace any more (src/frontline/router.py
 no longer has _frontline_reason(), blocked-screen.js's _renderConflict()
 no longer reads conflicting.reason).
 
+Item 2: Supervisor's authority_binding_id and assignedRole must always
+come from the same resolve_authority() call (fully live), matching
+src/frontline/router.py's existing model -- no persisted/live mix.
+
 Same stub-session infrastructure as tests/test_frontline_router.py and
 tests/test_supervisor_blocked_screen.py: a fake AsyncSession returning a
 controlled AdjudicationAuditEntry row, no live Postgres.
@@ -55,6 +59,16 @@ NO_GO_EVIDENCE = {
         "is_design_alteration": False,
     },
     "sha256_signature": "irrelevant-for-this-test",
+}
+
+DESIGN_ALTERATION_NO_GO_EVIDENCE = {
+    **NO_GO_EVIDENCE,
+    "claim_id": "CLM-DA-501",
+    "input_payload": {
+        **NO_GO_EVIDENCE["input_payload"],
+        "claim_id": "CLM-DA-501",
+        "is_design_alteration": True,
+    },
 }
 
 
@@ -116,3 +130,21 @@ def test_frontline_and_supervisor_show_the_identical_reason_string():
 
     assert frontline_data["reason"] == supervisor_data["evidence"]["reason"]
     assert frontline_data["reason"] == NO_GO_EVIDENCE["reason"]
+
+
+def test_supervisor_authority_binding_id_and_role_come_from_the_same_resolve_authority_call():
+    """
+    Item 2: a design-alteration claim resolves to three bindings (the
+    reason_code tier's RTO, plus QP and QE) -- proves the pairing holds
+    across more than one binding, not just a single-binding coincidence
+    -- and that the persisted, deliberately-stale "BIND-999" fixture
+    value never reaches the page at all any more.
+    """
+    with _client_with_record(DESIGN_ALTERATION_NO_GO_EVIDENCE) as client:
+        response = client.get("/supervisor/blocked/CLM-DA-501")
+
+    data = _embedded_data(response.text)
+
+    assert data["evidence"]["authority_binding_id"] == "BIND-RTO-01, BIND-QP-DA-01, BIND-QE-DA-01"
+    assert data["assignedRole"] == "RTO, Qualified Person, QE"
+    assert "BIND-999" not in response.text

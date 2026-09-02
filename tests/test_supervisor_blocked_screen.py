@@ -109,11 +109,14 @@ def test_blocked_screen_renders_for_real_no_go_claim():
     body = response.text
     assert "CLM-EPTW-301" in body
     assert "R-PTW-01" in body
-    # "BIND-999" here is the raw, persisted evidence["authority_binding_id"]
-    # fixture value rendered verbatim (src/supervisor/router.py never
-    # recomputes this field) -- unrelated to the live resolve_authority()
-    # call below, which now resolves R-PTW-01 to RTO.
-    assert "BIND-999" in body
+    # 2026-09-02, Frontline/Supervisor consistency Item 2:
+    # authority_binding_id is now live-resolved (same resolve_authority()
+    # call as assignedRole), not the persisted evidence["authority_binding_id"]
+    # fixture value -- "BIND-999" (deliberately stale/mismatched in this
+    # fixture) must never reach the page; "BIND-RTO-01" (R-PTW-01's real,
+    # live-resolved binding) must.
+    assert "BIND-999" not in body
+    assert '"authority_binding_id": "BIND-RTO-01"' in body
     assert "ptw_precondition_check" in body
     assert '"/static/blocked-screen/blocked-screen.js"' in body
     # 2026-08-06, Task A: this route calls resolve_authority() for

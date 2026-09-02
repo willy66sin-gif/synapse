@@ -106,12 +106,20 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
     # binding (reason_code tier, plus QP/QE if is_design_alteration) --
     # joined into a single display string here since blocked-screen.js
     # renders assignedRole as a scalar (unchanged, out of this pass's
-    # scope). evidence["authority_binding_id"] below is the raw,
-    # persisted value from src/evidence/emitter.py (list-valued as of
-    # 2026-08-18 too) rendered verbatim, not re-joined -- it was never
-    # this route's live-resolved value to begin with (see the existing
-    # comment on frontend/README.md), so it stays whatever shape
-    # emit_evidence() actually persisted.
+    # scope).
+    #
+    # Escalation-owner pairing fix (2026-09-02, Frontline/Supervisor
+    # consistency follow-up, Item 2): authority_binding_id below is now
+    # this SAME live `bindings` list, joined the same way as
+    # assignedRole -- not evidence["authority_binding_id"] (the
+    # persisted value from src/evidence/emitter.py, frozen at
+    # adjudication time). Previously this route paired a live-resolved
+    # role with a historical binding ID; the two could silently
+    # mismatch each other if src/maestro/directory.py's routing table
+    # changed between adjudication time and view time. Matches
+    # src/frontline/router.py's existing fully-live model exactly: both
+    # fields now come from the same resolve_authority() call, always
+    # mutually consistent, never a persisted/live mix.
     bindings = resolve_authority(zone_id, evidence["reason_code"], is_design_alteration)
 
     blocked_screen_data = {
@@ -120,7 +128,7 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
             "decision": evidence["decision"],
             "reason": evidence["reason"],
             "reason_code": evidence["reason_code"],
-            "authority_binding_id": evidence.get("authority_binding_id"),
+            "authority_binding_id": ", ".join(binding.binding_id for binding in bindings),
             "rule_trace": evidence["rule_trace"],
             "evaluated_at": evidence["evaluated_at"],
         },

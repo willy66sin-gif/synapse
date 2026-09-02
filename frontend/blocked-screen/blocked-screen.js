@@ -43,7 +43,10 @@
  *       decision: "GO" | "NO_GO",
  *       reason: string,
  *       reason_code: string | null,
- *       authority_binding_id: string | null,  // real, persisted (src/maestro/directory.py's AuthorityBinding.binding_id) — null on GO
+ *       authority_binding_id: string,  // live-resolved (src/maestro/directory.py's resolve_authority()),
+ *                                       // joined the same way and from the same call as assignedRole below
+ *                                       // (2026-09-02, Frontline/Supervisor consistency Item 2 — previously
+ *                                       // this was the persisted, historical value; now always paired live)
  *       rule_trace: Array<{ rule_id: string, passed: boolean, reason: string }>,
  *       evaluated_at: string,
  *     },
