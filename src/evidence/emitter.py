@@ -34,6 +34,15 @@ additive: it has no way to modify, replace, or remove an existing
 AdjudicationRecord — the two record types coexist in the audit trail,
 linked only by claim_id.
 
+emit_doctrine_submission_evidence() (2026-09-02, Tier 2 CORENET X
+Parallel Entry) signs a sixth, distinct record type for a
+DoctrineSubmission creation event. Not a fail-closed gate — per that
+build's own non-goals, this record does not gate adjudication and
+src/core/ has no knowledge it exists — but creation-event evidencing
+follows the same "every fail-closed gate gets its own signed evidence
+record" discipline per that build's explicit instruction. See its own
+docstring below for staleness_days.
+
 emit_billing_statement_evidence() (2026-09-01, Hamilton Labs
 statement-of-accounts) signs a fifth, distinct record type for a
 billing-statement send attempt — success or failure alike, per that
@@ -232,6 +241,41 @@ def emit_billing_statement_evidence(statement: dict, delivered: bool, detail: st
         "statement": statement,
         "delivered": delivered,
         "detail": detail,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_doctrine_submission_evidence(submission: dict, staleness_days: int) -> dict:
+    """
+    Signs a DoctrineSubmission creation event as its own distinct
+    record type, via the same SHA-256/JSON-LD mechanism as the other
+    emit_*() functions in this module (Tier 2 CORENET X Parallel Entry,
+    2026-09-02).
+
+    submission is the plain dict (DoctrineSubmission.model_dump(mode="json"),
+    with receipt_timestamp overwritten to the server-set value) --
+    not the pydantic type itself, so this module stays decoupled from
+    src/doctrine/ exactly as it already stays decoupled from
+    src/maestro/, src/supervisor/, and src/billing/. Stored whole under
+    its own "submission" key, mirroring emit_billing_statement_evidence()'s
+    "statement": statement shape, rather than cherry-picking fields.
+
+    staleness_days (receipt_timestamp minus corenet_x_approval_date) is
+    computed by the caller (src/doctrine/router.py) and threaded in
+    here as a derived value -- surfaced only inside this signed record,
+    never its own persisted column anywhere (see
+    src/doctrine/models.py's module docstring).
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "DoctrineSubmissionReceiptRecord",
+        "submission": submission,
+        "staleness_days": staleness_days,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 

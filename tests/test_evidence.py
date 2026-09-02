@@ -14,6 +14,7 @@ import json
 from src.core.evaluator import Verdict
 from src.evidence.emitter import (
     emit_billing_statement_evidence,
+    emit_doctrine_submission_evidence,
     emit_evidence,
     emit_override_evidence,
     emit_profile_rejection_evidence,
@@ -269,6 +270,80 @@ def test_emit_billing_statement_evidence_tampering_invalidates_signature():
     recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
 
     assert recomputed != tampered["sha256_signature"]
+
+
+# --- Tier 2 CORENET X Parallel Entry (2026-09-02): emit_doctrine_submission_evidence() ---
+
+DOCTRINE_SUBMISSION = {
+    "submission_id": "SUB-0001",
+    "submitting_party_id": "Acme Architects",
+    "jurisdiction_code": "SG",
+    "citations": ["SS EN 1992-1-1"],
+    "ambiguity_resolution_notes": "n/a",
+    "submitted_at": "2026-08-12T09:30:00",
+    "signed_off": True,
+    "corenet_x_reference": "CNX-2026-00417",
+    "corenet_x_gateway": "DESIGN",
+    "corenet_x_approval_date": "2026-08-01",
+    "entered_by": "QP",
+    "receipt_timestamp": "2026-08-06T00:00:00+00:00",
+}
+
+
+def test_emit_doctrine_submission_evidence_produces_signature():
+    result = emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    assert "sha256_signature" in result
+    assert len(result["sha256_signature"]) == 64
+
+
+def test_emit_doctrine_submission_evidence_signature_matches_recomputed_hash():
+    result = emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    unsigned = {k: v for k, v in result.items() if k != "sha256_signature"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert result["sha256_signature"] == expected
+
+
+def test_emit_doctrine_submission_evidence_is_a_distinct_record_type():
+    result = emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    assert result["type"] == "DoctrineSubmissionReceiptRecord"
+    assert result["type"] not in (
+        "AdjudicationRecord",
+        "OverrideRecord",
+        "ProfileRejectionRecord",
+        "BillingStatementRecord",
+    )
+
+
+def test_emit_doctrine_submission_evidence_carries_the_full_submission_and_staleness():
+    result = emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    assert result["submission"] == DOCTRINE_SUBMISSION
+    assert result["staleness_days"] == 5
+
+
+def test_emit_doctrine_submission_evidence_tampering_invalidates_signature():
+    result = emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    tampered = dict(result)
+    tampered["staleness_days"] = 999
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]
+
+
+def test_emit_doctrine_submission_evidence_does_not_mutate_original_adjudication_record():
+    original = emit_evidence(CLAIM_PAYLOAD, VERDICT)
+    original_snapshot = dict(original)
+
+    emit_doctrine_submission_evidence(DOCTRINE_SUBMISSION, staleness_days=5)
+
+    assert original == original_snapshot
 
 
 def test_emit_evidence_authority_binding_id_is_included_in_the_signed_payload():

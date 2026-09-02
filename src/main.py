@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from src.airlock.router import router as airlock_router
+from src.doctrine.router import router as doctrine_router
 from src.frontline.router import router as frontline_router
 from src.supervisor.router import router as supervisor_router
 
@@ -29,6 +30,7 @@ app = FastAPI(title="Synapse", version="0.1.0")
 app.include_router(airlock_router)
 app.include_router(supervisor_router)
 app.include_router(frontline_router)
+app.include_router(doctrine_router)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
