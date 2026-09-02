@@ -49,17 +49,39 @@ reason_code), then binding.role for the display label (already
 resolved via src/core/roles.py's role_type_label() at binding-
 construction time, not re-resolved here) and binding.binding_id for
 the (still secondary/reference-only, unchanged) trace ID.
+
+GET /supervisor/blocked/{claim_id}/status (2026-09-02, Frontline/
+Supervisor consistency follow-up, Item 3): polling parity with
+src/frontline/router.py's frontline_status_json(), the exact same
+pattern reused, not reinvented -- see that function's own docstring for
+the full GO Freshness design (re-adjudicate fresh every call,
+transition-only evidence write, concurrency re-check) and
+blocked_screen_status()'s own docstring below for the one deliberate
+difference (no NO_GO-only 409 gate on this endpoint).
 """
 import html
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.repository import get_db_session
-from src.evidence.repository import fetch_latest_adjudication_record
+from src.airlock.schemas import ClaimPayload
+from src.billing.service import on_claim_finalized
+from src.core.evaluator import adjudicate
+from src.core.repository import (
+    fetch_issuer_record,
+    fetch_issuer_roles,
+    fetch_zone_record,
+    get_db_session,
+    get_redis_client,
+)
+from src.evidence.emitter import emit_evidence
+from src.evidence.repository import fetch_latest_adjudication_record, persist_adjudication_record
+from src.frontline.router import _verdict_transitioned
 from src.maestro.directory import resolve_authority
+from src.profiles.repository import fetch_certified_profile
 from src.supervisor.schemas import OverrideRecord
 
 router = APIRouter(prefix="/supervisor", tags=["supervisor"])
@@ -139,6 +161,115 @@ async def blocked_screen(claim_id: str, session: AsyncSession = Depends(get_db_s
     }
 
     return HTMLResponse(_render_blocked_screen_page(blocked_screen_data))
+
+
+@router.get("/blocked/{claim_id}/status")
+async def blocked_screen_status(
+    claim_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    redis_client: Redis = Depends(get_redis_client),
+) -> dict:
+    """
+    Supervisor polling parity (2026-09-02, Frontline/Supervisor
+    consistency follow-up, Item 3). JSON counterpart to
+    GET /supervisor/blocked/{claim_id}, polled by blocked-screen.js the
+    same way src/frontline/router.py's frontline_status_json() is
+    already polled by frontline-screen.js -- same re-adjudicate-fresh-
+    every-call design, same transition-only evidence-write behavior,
+    reusing _verdict_transitioned() from that module directly rather
+    than reimplementing the same diff logic here. See that function's
+    own docstring for the full GO Freshness design (staleness gap,
+    read/write boundary, concurrency re-check) -- unchanged and not
+    repeated here.
+
+    Unlike GET /supervisor/blocked/{claim_id} (the HTML route, still
+    NO_GO-only -- 409 on GO, unchanged), this status endpoint returns
+    200 for GO too: gating it the same way would make a NO_GO -> GO
+    transition poll come back as a permanent 409, freezing the screen
+    exactly when freshness matters most. blocked-screen.js's `_render()`
+    already handles a GO payload correctly (it only conditionally shows
+    the NO_GO-specific "Do not proceed."/conflict box), so this needs no
+    client-side branching either.
+
+    Response shape matches blocked_screen()'s blocked_screen_data
+    exactly, so the client's existing `data` setter/_render() path
+    handles a poll response exactly like the initial server-rendered
+    payload. authority_binding_id/assignedRole both come from this
+    call's single resolve_authority() call -- same Item 2 fix as the
+    HTML route above, not a second, independently-paired pair.
+
+    evaluated_at reflects the latest actually-persisted record: the
+    original evidence's timestamp when nothing changed, or the newly
+    written transition evidence's timestamp when a transition just got
+    persisted (verdict itself carries no evaluated_at -- that's only
+    added at signing time by src/evidence/emitter.py's emit_evidence()).
+    """
+    evidence = await fetch_latest_adjudication_record(session, claim_id)
+
+    if evidence is None:
+        raise HTTPException(status_code=404, detail=f"No record found for claim '{claim_id}'.")
+
+    claim = ClaimPayload(**evidence["input_payload"])
+
+    issuer_record = await fetch_issuer_record(session, claim.issuer_id)
+    zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
+    certified_profile = None
+    if claim.profile_id is not None:
+        certified_profile = await fetch_certified_profile(session, claim.profile_id)
+
+    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, certified_profile)
+
+    evaluated_at = evidence["evaluated_at"]
+    if _verdict_transitioned(verdict, evidence):
+        # Re-check immediately before writing -- see
+        # frontline_status_json()'s own docstring's Concurrency note for
+        # exactly what this does and does not guarantee.
+        latest_at_write_time = await fetch_latest_adjudication_record(session, claim_id)
+        if _verdict_transitioned(verdict, latest_at_write_time):
+            transition_authority_binding_id = None
+            if verdict["decision"] == "NO_GO":
+                transition_authority_binding_id = [
+                    binding.binding_id
+                    for binding in resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
+                ]
+            transition_evidence = emit_evidence(
+                claim.model_dump(mode="json"), verdict, authority_binding_id=transition_authority_binding_id
+            )
+            await persist_adjudication_record(session, transition_evidence)
+            evaluated_at = transition_evidence["evaluated_at"]
+            # Same billing-statement event trigger as
+            # src/airlock/router.py's submit_claim() and
+            # src/frontline/router.py's frontline_status_json() -- a
+            # poll-detected verdict transition is equally "a relevant
+            # claim-outcome record finalizing." Same broad-except
+            # boundary rationale as both of those call sites: this
+            # polling endpoint's own availability must not depend on
+            # the billing subsystem's health.
+            try:
+                await on_claim_finalized(session)
+            except Exception as exc:  # noqa: BLE001 - infra boundary, see comment above
+                print(f"Billing statement event trigger failed: {exc}")
+        else:
+            evaluated_at = latest_at_write_time["evaluated_at"]
+
+    bindings = resolve_authority(claim.zone_id, verdict["reason_code"], claim.is_design_alteration)
+
+    return {
+        "evidence": {
+            "claim_id": verdict["claim_id"],
+            "decision": verdict["decision"],
+            "reason": verdict["reason"],
+            "reason_code": verdict["reason_code"],
+            "authority_binding_id": ", ".join(binding.binding_id for binding in bindings),
+            "rule_trace": verdict["rule_trace"],
+            "evaluated_at": evaluated_at,
+        },
+        "assignedRole": ", ".join(binding.role for binding in bindings),
+        "escalationContact": "Your site supervisor",
+        "issuerId": claim.issuer_id,
+        "overrideEndpoint": "/supervisor/override",
+    }
 
 
 def _render_blocked_screen_page(data: dict) -> str:

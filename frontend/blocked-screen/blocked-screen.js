@@ -25,9 +25,34 @@
  *   Override-form-only re-renders (pending/success/error) reuse whatever
  *   role the last real verdict assignment set; they never flip it.
  *
- * Explicitly NOT touched in this pass: GO freshness/expiry/revalidation,
- * telemetry assurance beyond the existing signed/unsigned/unknown
- * placeholder, any new reason codes, BIND-999 interactivity (still none).
+ * Polling parity (2026-09-02, Frontline/Supervisor consistency follow-up,
+ * Item 3): supersedes the "GO freshness/expiry/revalidation... NOT
+ * touched" note that used to be here. Ported from frontline-screen.js's
+ * own polling implementation verbatim (_ensurePolling/_poll/_stopPolling,
+ * same POLL_INTERVAL_MS, same "reassign `this.data`, reuse the existing
+ * setter/_render() path" design) -- ports src/supervisor/router.py's new
+ * GET /supervisor/blocked/{claim_id}/status the same way that file's
+ * frontline_status_json() is already polled. A polled response can carry
+ * decision: "GO" (a NO_GO -> GO transition) even though this component's
+ * primary-instruction copy stays NO_GO-only (see above, still
+ * unchanged) -- `isBlocked` in `_render()` already handles that
+ * gracefully (no "You may proceed." copy, but every other section still
+ * renders correctly), so no new branching was needed here for it.
+ *
+ * Interaction with the override form (known, accepted side effect, not
+ * silently ignored -- override logic itself is untouched, per this
+ * pass's own non-goals): a poll landing while an override submission's
+ * pending/success/error result is still on screen will reset
+ * `_overrideState` back to idle, same as any other `data` reassignment
+ * already did before this pass (see the setter below) -- it was simply
+ * unreachable until now, since nothing polled. A user reading a
+ * just-submitted override result could see it cleared after up to
+ * POLL_INTERVAL_MS. Not fixed in this pass -- flagged for a future
+ * decision, not something this pass was authorized to change.
+ *
+ * Explicitly still NOT touched in this pass: telemetry assurance beyond
+ * the existing signed/unsigned/unknown placeholder, any new reason
+ * codes, BIND-999 interactivity (still none).
  *
  * No framework dependency: no repo-wide frontend stack exists yet (no
  * package.json, no frontend/ directory prior to this component) — see
@@ -70,6 +95,7 @@ class BlockedScreen extends HTMLElement {
     this._overrideState = { status: "idle", message: "" }; // idle | pending | success | error
     this._regionRole = "status";
     this._regionLive = "polite";
+    this._pollTimer = null;
   }
 
   set data(value) {
@@ -92,6 +118,7 @@ class BlockedScreen extends HTMLElement {
     this._data = value;
     this._overrideState = { status: "idle", message: "" };
     this._render();
+    this._ensurePolling();
   }
 
   get data() {
@@ -100,6 +127,47 @@ class BlockedScreen extends HTMLElement {
 
   connectedCallback() {
     this._render();
+    this._ensurePolling();
+  }
+
+  disconnectedCallback() {
+    this._stopPolling();
+  }
+
+  // Polling parity (2026-09-02) -- ported from frontline-screen.js's
+  // _ensurePolling()/_poll()/_stopPolling() verbatim, same
+  // POLL_INTERVAL_MS, same idempotent-safe-to-call-from-both-places
+  // design. Starts once evidence.claim_id is known (from either the
+  // server-rendered initial payload or a prior poll response).
+  _ensurePolling() {
+    if (this._pollTimer || !this._data || !this._data.evidence || !this._data.evidence.claim_id) return;
+    this._pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
+  }
+
+  _stopPolling() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+  }
+
+  // Reassigns `this.data` on a successful response so the exact same
+  // setter/_render() path handles a polled update as handles the
+  // initial server-rendered payload -- same design as
+  // frontline-screen.js's _poll(). A network failure or non-OK response
+  // leaves the last known-good render on screen and retries on the next
+  // tick; it is not surfaced as an error state.
+  async _poll() {
+    if (!this._data || !this._data.evidence || !this._data.evidence.claim_id) return;
+    try {
+      const response = await fetch(
+        `/supervisor/blocked/${encodeURIComponent(this._data.evidence.claim_id)}/status`
+      );
+      if (!response.ok) return;
+      this.data = await response.json();
+    } catch {
+      // Network hiccup: keep showing the last known-good state.
+    }
   }
 
   _render() {
@@ -316,6 +384,15 @@ function escapeHtml(value) {
     "'": "&#39;",
   })[ch]);
 }
+
+// Polling parity (2026-09-02): same value as frontline-screen.js's own
+// POLL_INTERVAL_MS -- see that file's own comment for why 15000 and its
+// still-provisional status (pending Ivan Lim's practitioner input on
+// real site connectivity). Kept as a separate constant here, not a
+// shared import, since no shared frontend module exists yet (see
+// frontend/README.md's still-open frontend-stack decision) -- both
+// components are deliberately zero-dependency Custom Elements.
+const POLL_INTERVAL_MS = 15000;
 
 const STYLE = `
   :host { display: block; font-family: system-ui, sans-serif; }
