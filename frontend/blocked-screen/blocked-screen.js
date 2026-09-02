@@ -122,7 +122,7 @@ class BlockedScreen extends HTMLElement {
 
         ${isBlocked ? `<p class="primary-instruction">Do not proceed.</p>` : ""}
 
-        ${isBlocked ? this._renderConflict(conflicting, evidence.reason_code) : ""}
+        ${isBlocked ? this._renderConflict(conflicting, evidence.reason_code, evidence.reason) : ""}
 
         <h3>Evaluated conditions</h3>
         <ul class="rule-trace">
@@ -147,16 +147,37 @@ class BlockedScreen extends HTMLElement {
     }
   }
 
-  _renderConflict(conflicting, reasonCode) {
+  _renderConflict(conflicting, reasonCode, reason) {
+    // Reason de-duplication (2026-09-02, Frontline/Supervisor
+    // consistency follow-up, Item 1): `reason` is evidence.reason,
+    // read straight through -- the single value
+    // src/core/evaluator.py's adjudicate() computed once, at
+    // adjudication time. This function no longer re-derives it from
+    // `conflicting.reason` (the matched rule_trace entry); `conflicting`
+    // is kept only to label WHICH rule failed (rule_id), a genuinely
+    // separate concern from the reason text itself. The two happened
+    // to always agree (adjudicate() short-circuits on the first
+    // failing rule, so its Verdict.reason and that rule's own reason
+    // are the same string by construction) -- but that was an
+    // unasserted invariant two independent implementations (this one,
+    // and the removed src/frontline/router.py::_frontline_reason())
+    // both silently depended on, not a shared source of truth.
     if (!conflicting) {
-      return `<p class="conflict missing">NO_GO verdict, but no failing condition was found in rule_trace — this is a display-layer contract violation, not a valid blocked state.</p>`;
+      return `
+        <div class="conflict missing">
+          <strong>Conflicting condition:</strong>
+          <span class="rule-id missing">rule_id unavailable — no failing condition was found in rule_trace</span>
+          ${reasonCode ? `<span class="reason-code">${escapeHtml(reasonCode)}</span>` : ""}
+          <p class="reason">${escapeHtml(reason)}</p>
+        </div>
+      `;
     }
     return `
       <div class="conflict">
         <strong>Conflicting condition:</strong>
         <span class="rule-id">${escapeHtml(conflicting.rule_id)}</span>
         ${reasonCode ? `<span class="reason-code">${escapeHtml(reasonCode)}</span>` : ""}
-        <p class="reason">${escapeHtml(conflicting.reason)}</p>
+        <p class="reason">${escapeHtml(reason)}</p>
       </div>
     `;
   }

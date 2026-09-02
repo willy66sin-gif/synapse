@@ -28,7 +28,15 @@
  *     claimId: string,
  *     decision: "GO" | "NO_GO",
  *     reasonCode: string | null,
- *     reason: string,        // plain-language only; "" on GO
+ *     reason: string,        // plain-language only; the same
+ *                            // evidence.reason value src/supervisor's
+ *                            // blocked-screen.js now also reads
+ *                            // directly (2026-09-02, Frontline/
+ *                            // Supervisor consistency Item 1) -- a
+ *                            // full sentence on GO too, but only ever
+ *                            // rendered here when isBlocked (see
+ *                            // _render() below), so GO's wording is
+ *                            // never actually shown
  *     workActivity: string,  // e.g. "MATERIAL_ENTRY" (ClaimPayload.action_type)
  *     traceId: string,       // e.g. "BIND-999" — secondary/reference only
  *     assignedRole: string,  // e.g. "General Duty Officer"

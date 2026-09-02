@@ -77,7 +77,16 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
         "claimId": evidence["claim_id"],
         "decision": evidence["decision"],
         "reasonCode": evidence["reason_code"],
-        "reason": _frontline_reason(evidence),
+        # Reason de-duplication (2026-09-02, Frontline/Supervisor
+        # consistency follow-up, Item 1): reads evidence["reason"]
+        # straight through -- the single value src/core/evaluator.py's
+        # adjudicate() computes once, at adjudication time, from
+        # whichever rule actually failed (or the GO sentence). No
+        # longer re-derived here; see this module's own removed
+        # _frontline_reason() (deleted this pass) and
+        # blocked-screen.js's _renderConflict() (updated the same way)
+        # for the two independent re-implementations this replaces.
+        "reason": evidence["reason"],
         "workActivity": evidence.get("input_payload", {}).get("action_type", ""),
         "traceId": ", ".join(binding.binding_id for binding in bindings),
         "assignedRole": ", ".join(binding.role for binding in bindings),
@@ -212,7 +221,9 @@ async def frontline_status_json(
         "claimId": verdict["claim_id"],
         "decision": verdict["decision"],
         "reasonCode": verdict["reason_code"],
-        "reason": _frontline_reason(verdict),
+        # Same de-duplication as frontline_status_screen() above --
+        # verdict["reason"] straight through, not re-derived.
+        "reason": verdict["reason"],
         "workActivity": claim.action_type,
         "traceId": ", ".join(binding.binding_id for binding in bindings),
         "assignedRole": ", ".join(binding.role for binding in bindings),
@@ -232,30 +243,6 @@ def _verdict_transitioned(verdict: dict, evidence: dict) -> bool:
     `evaluated_at` timestamps -- none of those alone make this true).
     """
     return verdict["decision"] != evidence["decision"] or verdict["reason_code"] != evidence.get("reason_code")
-
-
-def _frontline_reason(evidence: dict) -> str:
-    """
-    Plain-language reason for a frontline worker: the specific failing
-    rule's own `reason` string, not the full rule_trace and not its
-    rule_id. Mirrors the "conflicting condition" concept from the
-    Supervisor UI Principle, but surfaces only its human-readable text
-    -- CLAUDE.md's Stage 2 Frontline Worker Contract explicitly
-    excludes rule internals from this screen. Empty on GO, where there
-    is nothing to explain.
-
-    Takes `dict` (not the narrower Verdict TypedDict) because both
-    callers pass it a persisted evidence record: frontline_status_screen()
-    passes a full AdjudicationRecord dict, and frontline_status_json()
-    (GO Freshness Phase 1) passes a freshly-computed Verdict -- both
-    happen to share the "decision"/"rule_trace"/"reason" keys this
-    function actually reads, so one implementation serves both without
-    a second, near-duplicate reason-extraction function.
-    """
-    if evidence["decision"] != "NO_GO":
-        return ""
-    failing = next((rule for rule in evidence.get("rule_trace", []) if rule.get("passed") is False), None)
-    return failing["reason"] if failing else evidence["reason"]
 
 
 def _render_frontline_screen_page(data: dict) -> str:
