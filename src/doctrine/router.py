@@ -23,10 +23,23 @@ staleness_days (receipt_timestamp minus corenet_x_approval_date) is
 computed here and threaded into the signed evidence record -- not
 persisted as its own column anywhere, per this build's explicit
 "derived, not stored" instruction.
+
+Duplicate submission_id handling (2026-09-02 follow-up):
+submission_id is DoctrineSubmissionRecord's primary key
+(src/doctrine/models.py) -- a repeated one raises IntegrityError on
+commit. Caught here specifically (not a broad except, same discipline
+as this codebase's other narrow except clauses) and turned into a
+clean 409, plain string detail -- mirrors src/supervisor/router.py's
+existing GET /supervisor/blocked/{claim_id} 409 shape ("Claim '...' is
+not blocked ...") rather than inventing a new error-response shape.
+Caught before any evidence is computed or persisted, so a rejected
+duplicate produces neither a second DoctrineSubmissionRecord row nor a
+DoctrineSubmissionReceiptAuditEntry for it.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository import get_db_session
@@ -50,7 +63,14 @@ async def submit_doctrine_submission(
 
     stored_fields = submission.model_dump()
     stored_fields["receipt_timestamp"] = receipt_timestamp
-    await persist_doctrine_submission(session, stored_fields)
+    try:
+        await persist_doctrine_submission(session, stored_fields)
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A doctrine submission with submission_id '{submission.submission_id}' already exists.",
+        ) from exc
 
     submission_json = submission.model_dump(mode="json")
     submission_json["receipt_timestamp"] = receipt_timestamp.isoformat()
