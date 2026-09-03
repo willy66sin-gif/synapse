@@ -106,6 +106,7 @@ async def seed_postgres() -> None:
                     base_profile_id=None,
                     base_profile_version=None,
                     parameters={},
+                    accountable_architect="Demo Architect, DEMO-0001",
                 )
             )
             await session.commit()

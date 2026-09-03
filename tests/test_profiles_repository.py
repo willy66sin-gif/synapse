@@ -47,6 +47,7 @@ async def test_fetch_certified_profile_returns_a_standalone_profile():
         base_profile_id=None,
         base_profile_version=None,
         parameters={"max_span_m": 12.0},
+        accountable_architect="Jane Tan, ARB-1234",
     )
     session = _StubSession(row)
 
@@ -55,6 +56,7 @@ async def test_fetch_certified_profile_returns_a_standalone_profile():
     assert result.lineage == ProfileLineage.STANDALONE
     assert result.base_ref is None
     assert result.parameters == {"max_span_m": 12.0}
+    assert result.accountable_architect == "Jane Tan, ARB-1234"
 
 
 @pytest.mark.asyncio
@@ -67,6 +69,7 @@ async def test_fetch_certified_profile_returns_a_base_annex_profile_with_base_re
         base_profile_id="EUROCODE-EC2-1-1",
         base_profile_version="2004+A1:2014",
         parameters={"partial_safety_factor": 1.35},
+        accountable_architect="Markus Weber, AKNW-5678",
     )
     session = _StubSession(row)
 

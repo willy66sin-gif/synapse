@@ -16,7 +16,15 @@ fabricated data.
 import pytest
 
 from src.maestro import directory
-from src.maestro.directory import ActivationMode, AuthorityBinding, AuthorityRoleType, Discipline, resolve_authority
+from src.maestro.directory import (
+    ActivationMode,
+    AuthorityBinding,
+    AuthorityRoleType,
+    Discipline,
+    resolve_authority,
+    resolve_pa_authority,
+)
+from src.profiles.schemas import BaseProfileRef, CertifiedProfile, ProfileLineage
 
 SPECIFIC = AuthorityBinding("BIND-001", "Zone A Safety Officer", "whatsapp:+6591234567")
 REASON_DEFAULT = AuthorityBinding("BIND-101", "Duty WSO", "whatsapp:+6590000001")
@@ -330,10 +338,13 @@ def test_qp_qe_are_not_reachable_via_any_directory_map_key():
 
 
 def test_pm_and_pa_have_no_directory_entries():
-    """PM and PA are deliberately unrouted -- not skipped, asserted
-    absent. PM: in-situ operational decisions pass through RTO's gate
-    rather than routing independently. PA: per-project liability
-    assignment is still unconfirmed (see CLAUDE.md's Open Items).
+    """PM and PA both have no DIRECTORY_MAP entry, for two different
+    reasons. PM: in-situ operational decisions pass through RTO's gate
+    rather than routing independently -- genuinely unrouted. PA: as of
+    2026-09-03, PA resolves dynamically per project via
+    resolve_pa_authority() (see directory.py), keyed on the claim's
+    Certified Profile rather than (zone_id, reason_code) -- so it has
+    no DIRECTORY_MAP entry to add, not because it's still unconfirmed.
     Neither role_type appears on any binding anywhere in the real,
     shipped DIRECTORY_MAP (which no longer contains QP/QE either, per
     the test above -- this checks PM/PA specifically, not "anything
@@ -342,3 +353,75 @@ def test_pm_and_pa_have_no_directory_entries():
 
     assert AuthorityRoleType.PM not in role_types_in_use
     assert AuthorityRoleType.PA not in role_types_in_use
+
+
+# --- PA authority resolution (2026-09-03): per-project liability assignment, resolved ---
+
+
+def test_resolve_pa_authority_reads_the_certified_profiles_accountable_architect():
+    """PA's real, live shape: dynamically built from the Certified
+    Profile submitted for the project, not looked up in DIRECTORY_MAP
+    -- the accountable_architect declared on that profile becomes the
+    binding's contact_id."""
+    profile = CertifiedProfile(
+        profile_id="SG-BC-2024",
+        jurisdiction_code="SG",
+        version="2024",
+        lineage=ProfileLineage.STANDALONE,
+        parameters={},
+        accountable_architect="Jane Tan, ARB-1234",
+    )
+
+    binding = resolve_pa_authority(profile)
+
+    assert binding.contact_id == "Jane Tan, ARB-1234"
+    assert binding.role_type == AuthorityRoleType.PA
+    assert binding.binding_id == "BIND-PA-SG-BC-2024"
+
+
+def test_resolve_pa_authority_varies_by_project_not_a_fixed_catalog_entry():
+    """Unlike SA/RTO (one fixed AuthorityBinding regardless of which
+    project's claim triggers it), two different projects' Certified
+    Profiles resolve to two different PA bindings -- liability
+    assignment is per-project, not a shared static role."""
+    profile_a = CertifiedProfile(
+        profile_id="SG-BC-2024",
+        jurisdiction_code="SG",
+        version="2024",
+        lineage=ProfileLineage.STANDALONE,
+        parameters={},
+        accountable_architect="Jane Tan, ARB-1234",
+    )
+    profile_b = CertifiedProfile(
+        profile_id="DE-EC2-ANNEX",
+        jurisdiction_code="DE",
+        version="2024",
+        lineage=ProfileLineage.BASE_ANNEX,
+        base_ref=BaseProfileRef(base_profile_id="EUROCODE-EC2-1-1", base_profile_version="2004+A1:2014"),
+        parameters={},
+        accountable_architect="Markus Weber, AKNW-5678",
+    )
+
+    binding_a = resolve_pa_authority(profile_a)
+    binding_b = resolve_pa_authority(profile_b)
+
+    assert binding_a.contact_id != binding_b.contact_id
+    assert binding_a.binding_id != binding_b.binding_id
+
+
+def test_pa_authority_not_reachable_via_resolve_authority():
+    """PA-gating is a third, orthogonal dimension keyed on the claim's
+    Certified Profile -- not folded into resolve_authority()'s
+    (zone_id, reason_code) lookup or its is_design_alteration flag, the
+    same way QP/QE are folded in. No combination of resolve_authority()
+    arguments can produce a PA binding; callers needing one call
+    resolve_pa_authority() directly."""
+    for zone_id, reason_code, is_design_alteration in [
+        ("ZONE-01", "R-PTW-01", False),
+        ("ZONE-01", "R-PTW-01", True),
+        ("ZONE-01", "R-ZONE-01", False),
+        ("ZONE-01", None, True),
+    ]:
+        result = resolve_authority(zone_id, reason_code, is_design_alteration=is_design_alteration)
+        role_types = {binding.role_type for binding in result}
+        assert AuthorityRoleType.PA not in role_types

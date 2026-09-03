@@ -57,6 +57,14 @@ class CertifiedProfile(BaseModel):
     is deliberately not this schema's job (see
     src/core/profile_resolution.py's module docstring for why that
     belongs in Core, not here).
+
+    `accountable_architect` (2026-09-03, per-project liability
+    assignment resolved): required, no default, same fail-closed
+    posture as `jurisdiction_code` — a Certified Profile with no
+    declared architect is rejected at the schema boundary, not
+    defaulted. This is the source src/maestro/directory.py's PA
+    resolution reads from: PA resolves dynamically per project from
+    this field, not from a static DIRECTORY_MAP entry like SA/RTO.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -67,6 +75,7 @@ class CertifiedProfile(BaseModel):
     lineage: ProfileLineage
     base_ref: Optional[BaseProfileRef] = None
     parameters: dict[str, Any]
+    accountable_architect: str
 
     @model_validator(mode="after")
     def _lineage_matches_base_ref(self) -> "CertifiedProfile":

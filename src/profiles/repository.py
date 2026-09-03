@@ -47,4 +47,5 @@ async def fetch_certified_profile(session: AsyncSession, profile_id: str) -> Opt
         lineage=row.lineage,
         base_ref=base_ref,
         parameters=row.parameters,
+        accountable_architect=row.accountable_architect,
     )

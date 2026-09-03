@@ -49,3 +49,4 @@ class CertifiedProfileRecord(Base):
     base_profile_id: Mapped[Optional[str]]
     base_profile_version: Mapped[Optional[str]]
     parameters: Mapped[dict] = mapped_column(JSON)
+    accountable_architect: Mapped[str]

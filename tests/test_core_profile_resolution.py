@@ -20,6 +20,7 @@ BASE = CertifiedProfile(
     version="2004+A1:2014",
     lineage=ProfileLineage.STANDALONE,
     parameters={"partial_safety_factor": 1.5, "concrete_class": "C25/30"},
+    accountable_architect="Jane Tan, ARB-1234",
 )
 
 ANNEX = CertifiedProfile(
@@ -29,6 +30,7 @@ ANNEX = CertifiedProfile(
     lineage=ProfileLineage.BASE_ANNEX,
     base_ref=BaseProfileRef(base_profile_id="EUROCODE-EC2-1-1", base_profile_version="2004+A1:2014"),
     parameters={"partial_safety_factor": 1.35},
+    accountable_architect="Markus Weber, AKNW-5678",
 )
 
 
@@ -56,6 +58,7 @@ def test_base_annex_profile_with_wrong_base_supplied_raises_mismatch_error():
         version="2005",
         lineage=ProfileLineage.STANDALONE,
         parameters={"partial_safety_factor": 1.0},
+        accountable_architect="Jane Tan, ARB-1234",
     )
 
     with pytest.raises(BaseProfileMismatchError):
@@ -69,6 +72,7 @@ def test_base_annex_profile_with_correct_id_but_wrong_pinned_version_raises_mism
         version="1992-1-1",  # earlier, unpinned version -- must not silently resolve against it
         lineage=ProfileLineage.STANDALONE,
         parameters={"partial_safety_factor": 1.2},
+        accountable_architect="Jane Tan, ARB-1234",
     )
 
     with pytest.raises(BaseProfileMismatchError):

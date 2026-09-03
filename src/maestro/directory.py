@@ -96,6 +96,7 @@ from enum import Enum
 from typing import Optional
 
 from src.core.roles import AuthorityRoleType, Discipline, role_type_label  # noqa: F401 - AuthorityRoleType/Discipline re-exported for backward compatibility
+from src.profiles.schemas import CertifiedProfile
 
 
 class ActivationMode(str, Enum):
@@ -220,18 +221,18 @@ _ZONE_SAFETY_AUTHORITY = AuthorityBinding(
 #    directly), since is_design_alteration is a genuinely separate
 #    lookup dimension, not a fake reason_code anymore.
 #
-# 3. PM and PA remain unrouted -- deliberately no AuthorityBinding
-#    entry for either, for two different reasons, neither a placeholder
-#    omission:
-#      - PM: in-situ operational decisions pass through RTO's gate
-#        rather than routing independently -- PM is not a separate
-#        escalation target, its ground is already covered by (1) above.
-#      - PA: per-project liability assignment is still unconfirmed (see
-#        CLAUDE.md's Open Items -- the original R-PTW-01 handoff paired
-#        "PI/PA" together, not a single role, and PI has since been
-#        removed as a category error, which eliminates one option
-#        without confirming the other). Do not add a PA binding until
-#        that liability question actually resolves.
+# 3. PM remains unrouted -- deliberately no AuthorityBinding entry:
+#    in-situ operational decisions pass through RTO's gate rather than
+#    routing independently -- PM is not a separate escalation target,
+#    its ground is already covered by (1) above.
+#
+#    PA is no longer in this category (2026-09-03) -- see
+#    resolve_pa_authority() below, and its own docstring, for why PA's
+#    resolution shape is deliberately different from every binding
+#    above: per-project liability assignment is now confirmed as
+#    resolving dynamically per claim, from the Certified Profile's
+#    accountable_architect field, not from a static DIRECTORY_MAP
+#    entry the way SA/RTO/QP/QE do.
 _CONTINUOUS_COMPLIANCE_AUTHORITY = AuthorityBinding(
     "BIND-RTO-01",
     # Bare code "RTO" -- unconfirmed label, same posture as SA above
@@ -267,6 +268,39 @@ _DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
     "design_alteration",
 )
 
+
+def resolve_pa_authority(certified_profile: CertifiedProfile) -> AuthorityBinding:
+    """
+    PA resolution (2026-09-03, per-project liability assignment
+    confirmed -- Willy, in conversation, resolving the open item this
+    module previously flagged: "Do not add a PA binding until that
+    liability question actually resolves"). Now resolved: unlike
+    SA/RTO/QP/QE, PA is not a fixed catalog entry -- liability
+    assignment is project-specific, so the returned binding is built
+    fresh from the Certified Profile submitted for that project, not
+    looked up in DIRECTORY_MAP by (zone_id, reason_code).
+
+    contact_id is certified_profile.accountable_architect itself --
+    a required, no-default, fail-closed field on CertifiedProfile (see
+    src/profiles/schemas.py) declared at doctrine-submission time, so a
+    profile missing it is rejected at the schema boundary long before
+    it could ever reach here, same posture as jurisdiction_code.
+
+    Not folded into resolve_authority()'s (zone_id, reason_code)
+    lookup or its is_design_alteration flag -- PA-gating is a third,
+    orthogonal dimension keyed on the claim's Certified Profile, not on
+    reason_code or a design-alteration flag. Callers that need a PA
+    binding call this directly with the profile in hand; resolve_authority()
+    itself is unchanged.
+    """
+    return AuthorityBinding(
+        f"BIND-PA-{certified_profile.profile_id}",
+        role_type_label(AuthorityRoleType.PA),
+        certified_profile.accountable_architect,
+        AuthorityRoleType.PA,
+    )
+
+
 # role_type intentionally left None on the catch-all -- "General Duty
 # Officer" is not one of the licensed PE/QP/PA/PM/SA/QE/RTO roles. It
 # remains the required fallback (resolve_authority() fails closed if
@@ -277,11 +311,14 @@ _DESIGN_ALTERATION_QE_AUTHORITY = AuthorityBinding(
 # RTO is now the live target for five entries -- reason_code=None (GO)
 # and R-PTW-01/R-AUTH-01/R-AUTH-02/R-AUTH-03 -- confirmed directly, not
 # speculative. R-ZONE-01 keeps its own separate, earlier-confirmed
-# routing to SA, untouched. PM and PA remain absent entirely, per point
-# 3 above. QP/QE are NOT in this map at all (as of 2026-08-18, point 2
+# routing to SA, untouched. PM remains absent entirely, per point 3
+# above. QP/QE are NOT in this map at all (as of 2026-08-18, point 2
 # above) -- they're a separate lookup dimension now
 # (is_design_alteration), resolved directly by resolve_authority()
-# below, not through a (zone_id, reason_code) key.
+# below, not through a (zone_id, reason_code) key. PA is likewise NOT
+# in this map (2026-09-03) -- see resolve_pa_authority() above: it
+# resolves from a Certified Profile, not a (zone_id, reason_code) key,
+# so it has no DIRECTORY_MAP entry to add.
 DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "*"): AuthorityBinding("BIND-999", "General Duty Officer", None, None),
     ("*", "R-ZONE-01"): _ZONE_SAFETY_AUTHORITY,
@@ -314,6 +351,11 @@ def resolve_authority(
     The catch-all is required to exist in DIRECTORY_MAP; this function
     fails closed (raises) rather than returning an unresolved binding
     if it's ever missing, instead of silently falling through to None.
+
+    Does not resolve PA -- see resolve_pa_authority() above, a
+    separate function callers use directly for PA-gated claims,
+    keyed on the claim's Certified Profile rather than (zone_id,
+    reason_code) or is_design_alteration.
     """
     reason_code_binding = None
     for key in ((zone_id, reason_code), ("*", reason_code), ("*", "*")):

@@ -577,6 +577,7 @@ VALID_PROFILE_ROW = CertifiedProfileRecord(
     base_profile_id=None,
     base_profile_version=None,
     parameters={},
+    accountable_architect="Jane Tan, ARB-1234",
 )
 
 
