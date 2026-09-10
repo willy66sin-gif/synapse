@@ -18,7 +18,16 @@ from fastapi.testclient import TestClient
 
 from src.core.repository import get_db_session, get_redis_client
 from src.main import app
-from tests.test_telemetry_zone_write import DEVICE_ID, PAYLOAD, ZONE_ID, _FakeRedis, _StubSession, _generate_keypair
+from tests.test_telemetry_zone_write import (
+    DEVICE_ID,
+    PAYLOAD,
+    RFID_DEVICE_ID,
+    RFID_PAYLOAD,
+    ZONE_ID,
+    _FakeRedis,
+    _StubSession,
+    _generate_keypair,
+)
 
 
 def _client_with_stubs(session, redis_client):
@@ -76,6 +85,36 @@ async def test_registered_device_success_returns_200_with_sensor_zone_state_evid
     assert body["field"] == "active_crane"
     assert body["value"] is True
     assert "sha256_signature" in body
+
+
+@pytest.mark.asyncio
+async def test_registered_device_success_for_tagged_asset_present_field_returns_200():
+    """Mirrors the active_crane success test above on the second
+    SENSOR_ELIGIBLE_ZONE_FIELDS entry -- confirms the HTTP layer needed
+    no field-specific changes either, same as the router/schema being
+    written generically over `field` from the start."""
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(RFID_PAYLOAD)
+    session = _StubSession(public_pem)
+    redis_client = await _seeded_redis()
+
+    with _client_with_stubs(session, redis_client) as client:
+        response = client.post(
+            "/telemetry/zone-state",
+            json=_body(
+                device_id=RFID_DEVICE_ID,
+                field="tagged_asset_present",
+                payload=RFID_PAYLOAD,
+                signature=signature,
+            ),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "SensorZoneStateRecord"
+    assert body["device_id"] == RFID_DEVICE_ID
+    assert body["field"] == "tagged_asset_present"
+    assert body["value"] is True
 
 
 @pytest.mark.asyncio

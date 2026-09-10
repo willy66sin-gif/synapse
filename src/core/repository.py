@@ -111,7 +111,8 @@ async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneR
     """
     Real replacement for synapse_mdm.py's ACTIVE_ZONES lookup. Zone
     state lives in Redis as a human-declared hash at key `zone:{zone_id}`
-    with fields `hazard_level` and `active_crane` ("true"/"false") —
+    with fields `hazard_level`, `active_crane`, and (2026-09-10)
+    `tagged_asset_present` ("true"/"false" for the latter two) —
     written by scripts/seed_dev_data.py — plus, as of the 2026-08-27
     telemetry-ingestion-pathway build, an optional verified-telemetry
     hash at src/core/rules.py's sensor_zone_redis_key(zone_id).
@@ -134,4 +135,5 @@ async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneR
     return ZoneRecord(
         hazard_level=_resolve_zone_field("hazard_level", sensor_data, human_data),
         active_crane=_resolve_zone_field("active_crane", sensor_data, human_data) == "true",
+        tagged_asset_present=_resolve_zone_field("tagged_asset_present", sensor_data, human_data) == "true",
     )

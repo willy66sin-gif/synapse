@@ -228,3 +228,145 @@ async def test_writing_a_non_sensor_eligible_field_is_rejected():
     outright, before even attempting device verification."""
     with pytest.raises(ValueError):
         await write_sensor_zone_state(None, None, DEVICE_ID, ZONE_ID, "hazard_level", True, PAYLOAD, b"sig")
+
+
+# --- tagged_asset_present (2026-09-10, second SENSOR_ELIGIBLE_ZONE_FIELDS
+# entry -- RFID-type presence/proximity signal, carrier-agnostic by
+# design). Mirrors the active_crane coverage above exactly, on a
+# second, distinct field, to confirm write_sensor_zone_state() and
+# fetch_zone_record()/_resolve_zone_field() needed zero changes beyond
+# the SENSOR_ELIGIBLE_ZONE_FIELDS entry itself -- both were already
+# generic over field name/value, per the 2026-09-09 investigate-only
+# finding this build confirms rather than contradicts. Field name is a
+# proposal, not locked -- see src/core/rules.py's ZoneRecord docstring
+# and this build's handoff report. ---
+
+RFID_DEVICE_ID = "DEV-RFID-01"
+RFID_PAYLOAD = b'{"device_id": "DEV-RFID-01", "zone_id": "ZONE-01", "field": "tagged_asset_present", "value": true}'
+
+
+@pytest.mark.asyncio
+async def test_tagged_asset_sensor_write_succeeds_and_is_readable_back_through_fetch_zone_record():
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(RFID_PAYLOAD)
+    session = _StubSession(public_pem)
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "false")
+
+    evidence = await write_sensor_zone_state(
+        session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
+    )
+
+    assert evidence["type"] == "SensorZoneStateRecord"
+    assert evidence["source"] == "VERIFIED_TELEMETRY"
+    assert evidence["device_id"] == RFID_DEVICE_ID
+    assert evidence["zone_id"] == ZONE_ID
+    assert evidence["field"] == "tagged_asset_present"
+    assert evidence["value"] is True
+    assert "sha256_signature" in evidence
+    assert session.committed is True
+    assert len(session.added) == 1
+
+    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    assert zone_record.tagged_asset_present is True  # sensor value, not the human-declared "false"
+    assert zone_record.active_crane is False  # untouched -- independent sensor-eligible field
+    assert zone_record.hazard_level == "LOW"
+
+
+@pytest.mark.asyncio
+async def test_tagged_asset_sensor_value_takes_precedence_over_conflicting_human_declaration():
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "false")
+    await redis_client.hset(f"zone:{ZONE_ID}:sensor", "tagged_asset_present", "true")
+
+    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+
+    assert zone_record.tagged_asset_present is True
+    assert zone_record.active_crane is False  # untouched -- no sensor value written for this field
+    assert zone_record.hazard_level == "LOW"
+
+
+@pytest.mark.asyncio
+async def test_zone_with_no_registered_tagged_asset_sensor_falls_back_to_human_declaration():
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "true")
+
+    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+
+    assert zone_record.tagged_asset_present is True
+    assert zone_record.hazard_level == "LOW"
+
+
+@pytest.mark.asyncio
+async def test_zone_with_no_tagged_asset_field_declared_at_all_defaults_to_false():
+    """A zone predating this field (human-declared hash has no
+    tagged_asset_present key at all) resolves to False, not an error --
+    _resolve_zone_field()'s human_data.get(field) returns None, and
+    None == "true" is False. Confirms the dataclass default (False) and
+    the read-path fallback agree for a zone that simply never declared
+    this field, not just one that declared it False explicitly."""
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+
+    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+
+    assert zone_record.tagged_asset_present is False
+
+
+@pytest.mark.asyncio
+async def test_unregistered_device_rejected_for_tagged_asset_field_with_its_own_reason_code_and_no_redis_write():
+    session = _StubSession(None)  # empty device_registry
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+
+    with pytest.raises(DeviceNotRegisteredError) as exc_info:
+        await write_sensor_zone_state(
+            session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, b"signature"
+        )
+
+    assert exc_info.value.reason_code == REASON_CODE_DEVICE_NOT_REGISTERED == "R-DEV-01"
+    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+
+    rejection = session.added[0].record
+    assert rejection["type"] == "SensorZoneStateRejectionRecord"
+    assert rejection["reason_code"] == "R-DEV-01"
+    assert rejection["field"] == "tagged_asset_present"
+
+
+@pytest.mark.asyncio
+async def test_tampered_signature_rejected_for_tagged_asset_field_with_its_own_reason_code_and_no_redis_write():
+    _, public_pem = _generate_keypair()
+    wrong_private_key, _ = _generate_keypair()
+    signature = wrong_private_key.sign(RFID_PAYLOAD)
+    session = _StubSession(public_pem)
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+
+    with pytest.raises(TelemetrySignatureInvalidError) as exc_info:
+        await write_sensor_zone_state(
+            session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
+        )
+
+    assert exc_info.value.reason_code == REASON_CODE_TELEMETRY_SIGNATURE_INVALID == "R-DEV-02"
+    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+
+
+def test_zone_record_tagged_asset_present_defaults_to_false_when_unspecified():
+    """Dataclass default, not a read-path fallback: confirms existing
+    ZoneRecord(hazard_level=..., active_crane=...) fixtures elsewhere in
+    this suite (tests/test_adjudication.py, tests/test_core_eptw.py,
+    tests/test_maestro_schemas.py) still construct valid records
+    unchanged, without needing to name this field."""
+    from src.core.rules import ZoneRecord
+
+    record = ZoneRecord(hazard_level="LOW", active_crane=False)
+    assert record.tagged_asset_present is False

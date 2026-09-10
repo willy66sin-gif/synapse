@@ -53,6 +53,22 @@ class ZoneRecord:
 
     hazard_level: str
     active_crane: bool
+    # tagged_asset_present (2026-09-10, second SENSOR_ELIGIBLE_ZONE_FIELDS
+    # entry): RFID-type presence/proximity signal, carrier-agnostic by
+    # design -- the physical carrier (human wearable, robot, robo-dog,
+    # drone, fixed reader) is architecturally irrelevant, same as
+    # active_crane not caring which specific crane. Defaulted to False,
+    # not left required like hazard_level/active_crane, purely so the
+    # several existing ZoneRecord(...) test fixtures across this repo
+    # (tests/test_adjudication.py, tests/test_core_eptw.py,
+    # tests/test_maestro_schemas.py) that predate this field keep
+    # constructing valid records without being touched -- not a claim
+    # that "no tag present" is the correct real-world default for every
+    # zone, just the least-disruptive one for a field dataclasses.field
+    # requires be declared after the two non-defaulted fields above it.
+    # Field name is a proposal, not locked -- flagged back to Willy,
+    # see this build's handoff report.
+    tagged_asset_present: bool = False
 
 
 # Sensor/human dual-input precedence (2026-08-27, telemetry-ingestion-
@@ -68,7 +84,16 @@ class ZoneRecord:
 # so a future dual-input field is a one-line addition here, not a new
 # precedence mechanism. hazard_level is deliberately absent: no sensor
 # source for it has been named by any decision to date.
-SENSOR_ELIGIBLE_ZONE_FIELDS = frozenset({"active_crane"})
+#
+# tagged_asset_present added 2026-09-10 as the second entry -- exactly
+# the one-line addition this frozenset was designed for, no new
+# precedence mechanism written. src/telemetry/zone_write.py's
+# write_sensor_zone_state() and src/core/repository.py's
+# fetch_zone_record()/_resolve_zone_field() needed zero code changes
+# beyond this entry -- both were already generic over field name, per
+# the 2026-09-09 investigate-only finding this build confirms rather
+# than contradicts.
+SENSOR_ELIGIBLE_ZONE_FIELDS = frozenset({"active_crane", "tagged_asset_present"})
 
 
 def sensor_zone_redis_key(zone_id: str) -> str:

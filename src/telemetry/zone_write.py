@@ -17,10 +17,15 @@ the sensor value at read time. This module's only job is: verify,
 write to the sensor hash, emit + persist evidence.
 
 Only fields in SENSOR_ELIGIBLE_ZONE_FIELDS may be written here —
-currently just active_crane, the one field this build's handoff names
-as dual-input-source. Deferred to Core's own set rather than
-hardcoding "active_crane" here, so a second sensor-eligible field is a
-one-line addition in src/core/rules.py, not a change to this module.
+active_crane plus, as of 2026-09-10, tagged_asset_present (a
+carrier-agnostic RFID-type presence/proximity signal — the physical
+carrier is architecturally irrelevant). Deferred to Core's own set
+rather than hardcoding field names here, so tagged_asset_present
+really was a one-line addition in src/core/rules.py, exactly as this
+module's design anticipated — zero changes needed in this file or in
+src/core/repository.py's fetch_zone_record()/_resolve_zone_field() to
+support it, confirming the 2026-09-09 investigate-only finding that
+both were already generic over field name and boolean value.
 
 On verification failure (DeviceNotRegisteredError /
 TelemetrySignatureInvalidError, each carrying its own reason_code —
