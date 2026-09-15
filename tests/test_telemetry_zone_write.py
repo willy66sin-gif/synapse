@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from src.core.repository import fetch_zone_record
+from src.telemetry.models import DeviceRegistryEntry, SensorZoneStateAuditEntry
 from src.telemetry.trust import (
     REASON_CODE_DEVICE_NOT_REGISTERED,
     REASON_CODE_TELEMETRY_SIGNATURE_INVALID,
@@ -24,6 +25,12 @@ from src.telemetry.zone_write import write_sensor_zone_state
 
 DEVICE_ID = "DEV-CRANE-01"
 ZONE_ID = "ZONE-01"
+# Project-scoping boundary (2026-09-15): both the human-declared zone
+# hash key (zone:{project_id}:{zone_id}, see src/core/repository.py's
+# fetch_zone_record()) and the verified-telemetry sensor hash key
+# (zone:{project_id}:{zone_id}:sensor, see src/core/rules.py's
+# sensor_zone_redis_key()) are namespaced by project_id.
+PROJECT_ID = "PROJ-TEST-01"
 PAYLOAD = b'{"device_id": "DEV-CRANE-01", "zone_id": "ZONE-01", "field": "active_crane", "value": true}'
 
 
@@ -35,25 +42,44 @@ def _generate_keypair():
     return private_key, public_pem
 
 
+class _Result:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
 class _StubSession:
     """
-    Backs fetch_device_public_key() (execute().scalar_one_or_none(),
-    same convention as tests/test_telemetry_trust.py's stub) and
-    persist_sensor_zone_state_record() (add()/commit()) -- extended
-    with the latter since this path also persists evidence, unlike the
-    pure verify_telemetry() tests.
+    Entity-dispatch stub serving fetch_device_public_key()'s
+    DeviceRegistryEntry query and (2026-09-15, device-reassignment
+    anomaly detection) fetch_latest_sensor_zone_state_project_id()'s
+    SensorZoneStateAuditEntry query off one session, plus
+    persist_sensor_zone_state_record()'s add()/commit() -- same
+    "dispatch by stmt.column_descriptions[0]['entity']" convention
+    tests/test_airlock_maestro.py's/tests/test_airlock_profile.py's
+    stub sessions already established, extended here since this path
+    now issues two distinct SELECT shapes, not one.
+
+    prior_project_id defaults to None (the common "first-ever write, or
+    a stub not exercising this path" case) -- pass it explicitly to
+    simulate a device with a real prior successful write on record.
     """
 
-    def __init__(self, public_key_pem):
+    def __init__(self, public_key_pem, prior_project_id=None):
         self._public_key_pem = public_key_pem
+        self._prior_project_id = prior_project_id
         self.added = []
         self.committed = False
 
-    async def execute(self, _stmt):
-        return self
-
-    def scalar_one_or_none(self):
-        return self._public_key_pem
+    async def execute(self, stmt):
+        entity = stmt.column_descriptions[0]["entity"]
+        if entity is DeviceRegistryEntry:
+            return _Result(self._public_key_pem)
+        if entity is SensorZoneStateAuditEntry:
+            return _Result(self._prior_project_id)
+        raise AssertionError(f"unexpected query in test_telemetry_zone_write.py stub: {stmt}")
 
     def add(self, obj):
         self.added.append(obj)
@@ -84,11 +110,11 @@ async def test_sensor_write_succeeds_and_is_readable_back_through_fetch_zone_rec
     signature = private_key.sign(PAYLOAD)
     session = _StubSession(public_pem)
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     evidence = await write_sensor_zone_state(
-        session, redis_client, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+        session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
     )
 
     assert evidence["type"] == "SensorZoneStateRecord"
@@ -97,13 +123,102 @@ async def test_sensor_write_succeeds_and_is_readable_back_through_fetch_zone_rec
     assert evidence["zone_id"] == ZONE_ID
     assert evidence["field"] == "active_crane"
     assert evidence["value"] is True
+    # Device-reassignment anomaly detection (2026-09-15): this stub's
+    # default prior_project_id=None models a device with no prior
+    # successful write on record at all -- a genuine first-ever write,
+    # not an anomaly, so project_changed_from must stay None.
+    assert evidence["project_changed_from"] is None
     assert "sha256_signature" in evidence
     assert session.committed is True
     assert len(session.added) == 1
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
     assert zone_record.active_crane is True  # sensor value, not the human-declared "false"
     assert zone_record.hazard_level == "LOW"
+
+
+# --- device-reassignment anomaly detection (2026-09-15, telemetry
+# project-scoping follow-on, part 2): detection only, write still
+# succeeds either way -- see write_sensor_zone_state()'s own docstring ---
+
+
+@pytest.mark.asyncio
+async def test_consecutive_write_for_the_same_project_is_not_flagged():
+    """A device's declared project_id matching its own most recently
+    recorded successful write is the common, non-anomalous case --
+    project_changed_from must stay None."""
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(PAYLOAD)
+    session = _StubSession(public_pem, prior_project_id=PROJECT_ID)
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+
+    evidence = await write_sensor_zone_state(
+        session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+    )
+
+    assert evidence["project_changed_from"] is None
+
+
+@pytest.mark.asyncio
+async def test_consecutive_write_for_a_different_project_is_flagged_but_still_succeeds(capsys):
+    """A device's declared project_id differing from its own most
+    recently recorded successful write is the anomaly this pass exists
+    to surface -- flagged on the evidence record AND printed for
+    immediate visibility, but the write itself must still succeed
+    (detection, not enforcement -- see write_sensor_zone_state()'s own
+    docstring)."""
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(PAYLOAD)
+    session = _StubSession(public_pem, prior_project_id="PROJ-OLD")
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+
+    evidence = await write_sensor_zone_state(
+        session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+    )
+
+    # The write still succeeded -- same assertions as the ordinary
+    # success test above, unaffected by the flag.
+    assert evidence["type"] == "SensorZoneStateRecord"
+    assert session.committed is True
+    assert len(session.added) == 1
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
+    assert zone_record.active_crane is True
+
+    # The anomaly itself: queryable on the evidence record...
+    assert evidence["project_changed_from"] == "PROJ-OLD"
+    assert evidence["project_id"] == PROJECT_ID
+
+    # ...and printed for immediate operational visibility.
+    printed = capsys.readouterr().out
+    assert "reassignment" in printed
+    assert DEVICE_ID in printed
+    assert "PROJ-OLD" in printed
+    assert PROJECT_ID in printed
+
+
+@pytest.mark.asyncio
+async def test_first_ever_write_for_a_device_is_not_flagged():
+    """No prior SensorZoneStateAuditEntry row at all for this device --
+    there is nothing to compare against, so this must NOT be treated as
+    an anomaly. Same scenario tests/test_sensor_write_succeeds_and_is_readable_back_through_fetch_zone_record
+    already exercises implicitly (its stub's default prior_project_id
+    is None); this test names the property explicitly."""
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(PAYLOAD)
+    session = _StubSession(public_pem, prior_project_id=None)
+    redis_client = _FakeRedis()
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+
+    evidence = await write_sensor_zone_state(
+        session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+    )
+
+    assert evidence["project_changed_from"] is None
 
 
 # --- sensor-vs-human precedence, isolated from the write call itself ---
@@ -112,11 +227,11 @@ async def test_sensor_write_succeeds_and_is_readable_back_through_fetch_zone_rec
 @pytest.mark.asyncio
 async def test_sensor_value_takes_precedence_over_conflicting_human_declaration():
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
-    await redis_client.hset(f"zone:{ZONE_ID}:sensor", "active_crane", "true")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor", "active_crane", "true")
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
 
     assert zone_record.active_crane is True
     assert zone_record.hazard_level == "LOW"  # untouched -- hazard_level has no sensor source
@@ -128,10 +243,10 @@ async def test_sensor_value_takes_precedence_over_conflicting_human_declaration(
 @pytest.mark.asyncio
 async def test_zone_with_no_registered_sensor_falls_back_to_human_declaration():
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
 
     assert zone_record.active_crane is False
     assert zone_record.hazard_level == "LOW"
@@ -145,16 +260,16 @@ async def test_zone_with_no_registered_sensor_falls_back_to_human_declaration():
 async def test_unregistered_device_rejected_with_its_own_reason_code_and_no_redis_write():
     session = _StubSession(None)  # empty device_registry
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     with pytest.raises(DeviceNotRegisteredError) as exc_info:
         await write_sensor_zone_state(
-            session, redis_client, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, b"signature"
+            session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, b"signature"
         )
 
     assert exc_info.value.reason_code == REASON_CODE_DEVICE_NOT_REGISTERED == "R-DEV-01"
-    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+    assert (await redis_client.hgetall(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
 
     # but the rejection itself is now audited:
     assert session.committed is True
@@ -177,16 +292,16 @@ async def test_tampered_signature_rejected_with_its_own_reason_code_and_no_redis
     signature = wrong_private_key.sign(PAYLOAD)
     session = _StubSession(public_pem)
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     with pytest.raises(TelemetrySignatureInvalidError) as exc_info:
         await write_sensor_zone_state(
-            session, redis_client, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+            session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
         )
 
     assert exc_info.value.reason_code == REASON_CODE_TELEMETRY_SIGNATURE_INVALID == "R-DEV-02"
-    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+    assert (await redis_client.hgetall(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
 
     assert session.committed is True
     assert len(session.added) == 1
@@ -211,11 +326,11 @@ async def test_successful_write_creates_exactly_one_record_not_a_rejection_too()
     signature = private_key.sign(PAYLOAD)
     session = _StubSession(public_pem)
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     await write_sensor_zone_state(
-        session, redis_client, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
+        session, redis_client, PROJECT_ID, DEVICE_ID, ZONE_ID, "active_crane", True, PAYLOAD, signature
     )
 
     assert len(session.added) == 1
@@ -227,7 +342,7 @@ async def test_writing_a_non_sensor_eligible_field_is_rejected():
     """hazard_level has no sensor source named by this build -- refused
     outright, before even attempting device verification."""
     with pytest.raises(ValueError):
-        await write_sensor_zone_state(None, None, DEVICE_ID, ZONE_ID, "hazard_level", True, PAYLOAD, b"sig")
+        await write_sensor_zone_state(None, None, PROJECT_ID, DEVICE_ID, ZONE_ID, "hazard_level", True, PAYLOAD, b"sig")
 
 
 # --- tagged_asset_present (2026-09-10, second SENSOR_ELIGIBLE_ZONE_FIELDS
@@ -251,12 +366,12 @@ async def test_tagged_asset_sensor_write_succeeds_and_is_readable_back_through_f
     signature = private_key.sign(RFID_PAYLOAD)
     session = _StubSession(public_pem)
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
-    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "tagged_asset_present", "false")
 
     evidence = await write_sensor_zone_state(
-        session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
+        session, redis_client, PROJECT_ID, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
     )
 
     assert evidence["type"] == "SensorZoneStateRecord"
@@ -269,7 +384,7 @@ async def test_tagged_asset_sensor_write_succeeds_and_is_readable_back_through_f
     assert session.committed is True
     assert len(session.added) == 1
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
     assert zone_record.tagged_asset_present is True  # sensor value, not the human-declared "false"
     assert zone_record.active_crane is False  # untouched -- independent sensor-eligible field
     assert zone_record.hazard_level == "LOW"
@@ -278,12 +393,12 @@ async def test_tagged_asset_sensor_write_succeeds_and_is_readable_back_through_f
 @pytest.mark.asyncio
 async def test_tagged_asset_sensor_value_takes_precedence_over_conflicting_human_declaration():
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
-    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "false")
-    await redis_client.hset(f"zone:{ZONE_ID}:sensor", "tagged_asset_present", "true")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "tagged_asset_present", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor", "tagged_asset_present", "true")
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
 
     assert zone_record.tagged_asset_present is True
     assert zone_record.active_crane is False  # untouched -- no sensor value written for this field
@@ -293,11 +408,11 @@ async def test_tagged_asset_sensor_value_takes_precedence_over_conflicting_human
 @pytest.mark.asyncio
 async def test_zone_with_no_registered_tagged_asset_sensor_falls_back_to_human_declaration():
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
-    await redis_client.hset(f"zone:{ZONE_ID}", "tagged_asset_present", "true")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "tagged_asset_present", "true")
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
 
     assert zone_record.tagged_asset_present is True
     assert zone_record.hazard_level == "LOW"
@@ -312,10 +427,10 @@ async def test_zone_with_no_tagged_asset_field_declared_at_all_defaults_to_false
     the read-path fallback agree for a zone that simply never declared
     this field, not just one that declared it False explicitly."""
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
-    zone_record = await fetch_zone_record(redis_client, ZONE_ID)
+    zone_record = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
 
     assert zone_record.tagged_asset_present is False
 
@@ -324,16 +439,16 @@ async def test_zone_with_no_tagged_asset_field_declared_at_all_defaults_to_false
 async def test_unregistered_device_rejected_for_tagged_asset_field_with_its_own_reason_code_and_no_redis_write():
     session = _StubSession(None)  # empty device_registry
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     with pytest.raises(DeviceNotRegisteredError) as exc_info:
         await write_sensor_zone_state(
-            session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, b"signature"
+            session, redis_client, PROJECT_ID, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, b"signature"
         )
 
     assert exc_info.value.reason_code == REASON_CODE_DEVICE_NOT_REGISTERED == "R-DEV-01"
-    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+    assert (await redis_client.hgetall(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
 
     rejection = session.added[0].record
     assert rejection["type"] == "SensorZoneStateRejectionRecord"
@@ -348,16 +463,16 @@ async def test_tampered_signature_rejected_for_tagged_asset_field_with_its_own_r
     signature = wrong_private_key.sign(RFID_PAYLOAD)
     session = _StubSession(public_pem)
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
 
     with pytest.raises(TelemetrySignatureInvalidError) as exc_info:
         await write_sensor_zone_state(
-            session, redis_client, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
+            session, redis_client, PROJECT_ID, RFID_DEVICE_ID, ZONE_ID, "tagged_asset_present", True, RFID_PAYLOAD, signature
         )
 
     assert exc_info.value.reason_code == REASON_CODE_TELEMETRY_SIGNATURE_INVALID == "R-DEV-02"
-    assert (await redis_client.hgetall(f"zone:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
+    assert (await redis_client.hgetall(f"zone:{PROJECT_ID}:{ZONE_ID}:sensor")) == {}  # still no ZoneRecord write
 
 
 def test_zone_record_tagged_asset_present_defaults_to_false_when_unspecified():

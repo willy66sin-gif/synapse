@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import settings
-from src.core.models import AuthorizedIssuer, IssuerRole
+from src.core.models import AuthorizedIssuer, IssuerProject, IssuerRole
 from src.core.roles import AuthorityRoleType
 from src.core.rules import SENSOR_ELIGIBLE_ZONE_FIELDS, IssuerRecord, ZoneRecord, sensor_zone_redis_key
 
@@ -92,6 +92,23 @@ async def fetch_issuer_roles(session: AsyncSession, issuer_id: str) -> list[Auth
     return list(result.scalars().all())
 
 
+async def fetch_issuer_projects(session: AsyncSession, issuer_id: str) -> list[str]:
+    """
+    Read-only access to src/core/models.py's IssuerProject
+    (2026-09-15, Ring-Fencing Concept Note -- Willy-authorized
+    implementation). Returns every project_id issuer_id is authorized
+    under -- zero, one, or several, same "join table, not a scalar
+    field" shape as fetch_issuer_roles() above, for the same reason (see
+    IssuerProject's own doc comment). Consumed by
+    src/airlock/project_check.py's check_project_scope(), the same
+    "already-fetched list" discipline issuer_roles already follows.
+    """
+    result = await session.execute(
+        select(IssuerProject.project_id).where(IssuerProject.issuer_id == issuer_id)
+    )
+    return list(result.scalars().all())
+
+
 def _resolve_zone_field(field: str, sensor_data: dict, human_data: dict) -> Optional[str]:
     """
     Sensor/human precedence (src/core/rules.py's
@@ -107,15 +124,33 @@ def _resolve_zone_field(field: str, sensor_data: dict, human_data: dict) -> Opti
     return human_data.get(field)
 
 
-async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneRecord]:
+async def fetch_zone_record(redis_client: Redis, project_id: str, zone_id: str) -> Optional[ZoneRecord]:
     """
     Real replacement for synapse_mdm.py's ACTIVE_ZONES lookup. Zone
-    state lives in Redis as a human-declared hash at key `zone:{zone_id}`
-    with fields `hazard_level`, `active_crane`, and (2026-09-10)
-    `tagged_asset_present` ("true"/"false" for the latter two) —
-    written by scripts/seed_dev_data.py — plus, as of the 2026-08-27
-    telemetry-ingestion-pathway build, an optional verified-telemetry
-    hash at src/core/rules.py's sensor_zone_redis_key(zone_id).
+    state lives in Redis as a human-declared hash at key
+    `zone:{project_id}:{zone_id}` (2026-09-15, Ring-Fencing Concept
+    Note -- Willy-authorized implementation; previously the unscoped
+    `zone:{zone_id}`) with fields `hazard_level`, `active_crane`, and
+    (2026-09-10) `tagged_asset_present` ("true"/"false" for the latter
+    two) — written by scripts/seed_dev_data.py.
+
+    project_id namespacing means a claim whose project_id doesn't match
+    the zone's actual project simply finds nothing here (the same
+    "zone does not exist" None case below) -- this is how the storage
+    layer itself enforces cross-project zone isolation, distinct from
+    src/airlock/project_check.py's explicit R-PROJECT-01 check (which
+    covers issuer/profile project mismatches, not zone -- see that
+    module's own docstring for why zone isolation is enforced here,
+    at the key level, rather than duplicated as a third project_check
+    branch).
+
+    RESOLVED (2026-09-15, telemetry project-scoping follow-on): the
+    verified-telemetry sensor hash (src/core/rules.py's
+    sensor_zone_redis_key(project_id, zone_id)) is now re-namespaced by
+    project_id too, closing the gap the prior project-scoping pass
+    flagged and left open (see CLAUDE.md's Changelog and Open Items).
+    Sensor-sourced fields (active_crane, tagged_asset_present) are now
+    project-isolated the same way hazard_level already is.
 
     A zone's existence is still determined by the human-declared hash
     alone (empty -> None, the same "zone does not exist" case
@@ -126,11 +161,11 @@ async def fetch_zone_record(redis_client: Redis, zone_id: str) -> Optional[ZoneR
     sensor over human declaration); otherwise the human-declared value
     is used, unchanged from before this build.
     """
-    human_data = await redis_client.hgetall(f"zone:{zone_id}")
+    human_data = await redis_client.hgetall(f"zone:{project_id}:{zone_id}")
     if not human_data:
         return None
 
-    sensor_data = await redis_client.hgetall(sensor_zone_redis_key(zone_id))
+    sensor_data = await redis_client.hgetall(sensor_zone_redis_key(project_id, zone_id))
 
     return ZoneRecord(
         hazard_level=_resolve_zone_field("hazard_level", sensor_data, human_data),

@@ -106,7 +106,14 @@ def emit_evidence(
     return record
 
 
-def emit_sensor_zone_state_evidence(device_id: str, zone_id: str, field: str, value: bool) -> dict:
+def emit_sensor_zone_state_evidence(
+    project_id: str,
+    device_id: str,
+    zone_id: str,
+    field: str,
+    value: bool,
+    project_changed_from: Optional[str] = None,
+) -> dict:
     """
     Signs a verified-telemetry ZoneRecord field write as its own
     distinct record type, via the same SHA-256/JSON-LD mechanism as
@@ -114,6 +121,30 @@ def emit_sensor_zone_state_evidence(device_id: str, zone_id: str, field: str, va
     a DeviceRegistryEntry/ZoneRecord type, so this module stays
     decoupled from src/telemetry/ exactly as it already stays
     decoupled from src/maestro/ and src/supervisor/.
+
+    project_id (2026-09-15, telemetry project-scoping follow-on):
+    records which project this sensor write was scoped to (see
+    src/core/rules.py's sensor_zone_redis_key(project_id, zone_id)) --
+    same "record which project this artifact covers" convention
+    BillingStatement.project_id (src/billing/schemas.py) already
+    established, so a reader of this audit trail doesn't have to infer
+    it from the Redis key format alone.
+
+    project_changed_from (2026-09-15, telemetry project-scoping
+    follow-on, part 2 -- device-reassignment anomaly detection):
+    Optional[str], defaulted to None and always present as a key on
+    this record (same "always present, None when not applicable"
+    convention Verdict["reason_code"] already follows) -- non-None only
+    when this device's previous successful write (per
+    src/telemetry/repository.py's
+    fetch_latest_sensor_zone_state_project_id()) was for a *different*
+    project_id than this write. Detection only, never enforcement: the
+    write this record documents already succeeded by the time this
+    field is populated -- see src/telemetry/zone_write.py's own
+    docstring for why this is a flag, not a rejection. None on a
+    device's first-ever write (nothing to compare against) and on any
+    write whose project_id matches the prior one -- both are the
+    non-anomalous, common case.
 
     source="VERIFIED_TELEMETRY" is what lets a reader of the audit
     trail distinguish this write from a human declaration — the
@@ -123,6 +154,8 @@ def emit_sensor_zone_state_evidence(device_id: str, zone_id: str, field: str, va
     record = {
         "@context": "https://synapse.org/schemas/audit/v1",
         "type": "SensorZoneStateRecord",
+        "project_id": project_id,
+        "project_changed_from": project_changed_from,
         "device_id": device_id,
         "zone_id": zone_id,
         "field": field,
@@ -138,7 +171,7 @@ def emit_sensor_zone_state_evidence(device_id: str, zone_id: str, field: str, va
 
 
 def emit_sensor_zone_rejection_evidence(
-    device_id: str, zone_id: str, field: str, attempted_value: bool, reason_code: str
+    project_id: str, device_id: str, zone_id: str, field: str, attempted_value: bool, reason_code: str
 ) -> dict:
     """
     Signs a rejected verified-telemetry write attempt as its own
@@ -146,6 +179,11 @@ def emit_sensor_zone_rejection_evidence(
     the other emit_*() functions in this module. Kept separate from
     emit_sensor_zone_state_evidence()'s SensorZoneStateRecord type —
     see this module's docstring for why.
+
+    project_id (2026-09-15, telemetry project-scoping follow-on): same
+    "record which project this was for" convention as the success-path
+    emitter above -- a rejection is still scoped to the project_id the
+    payload declared, even though nothing was written.
 
     attempted_value is recorded under its own key, not `value`, to
     make clear it was never verified or written — this is a record of
@@ -159,6 +197,7 @@ def emit_sensor_zone_rejection_evidence(
     record = {
         "@context": "https://synapse.org/schemas/audit/v1",
         "type": "SensorZoneStateRejectionRecord",
+        "project_id": project_id,
         "device_id": device_id,
         "zone_id": zone_id,
         "field": field,
@@ -204,6 +243,48 @@ def emit_profile_rejection_evidence(claim_id: str, profile_id: Optional[str], re
         "type": "ProfileRejectionRecord",
         "claim_id": claim_id,
         "profile_id": profile_id,
+        "reason_code": reason_code,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_project_scope_rejection_evidence(claim_id: str, project_id: str, reason_code: str) -> dict:
+    """
+    Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note,
+    26 Aug 2026 -- Willy-authorized implementation): signs a rejected
+    cross-project reference check as its own distinct record type, via
+    the same SHA-256/JSON-LD mechanism as the other emit_*() functions
+    in this module -- mirrors emit_profile_rejection_evidence()'s shape
+    exactly, same reasoning: this fires at src/airlock/router.py BEFORE
+    src/core/evaluator.py's adjudicate() ever runs (see
+    src/airlock/project_check.py's module docstring), so there is no
+    Verdict/AdjudicationRecord for this rejection to live inside --
+    folding it into AdjudicationAuditEntry would misrepresent a claim
+    that never reached Core as one Core actually adjudicated. Its own
+    record type, its own audit table
+    (src/airlock/models.py's ProjectScopeRejectionAuditEntry), same
+    "distinct evidence types live in distinct tables" convention as
+    AdjudicationAuditEntry vs. OverrideAuditEntry vs.
+    ProfileRejectionAuditEntry.
+
+    project_id here is the claim's OWN declared project_id (always
+    present -- project_id is a required ClaimPayload field, unlike
+    profile_id) -- not the mismatched profile's or issuer's project,
+    which stay inside the human-readable `message` on
+    ProjectScopeViolationError and are not separately columned here, same
+    "reason text carries the specific detail" convention
+    emit_evidence()'s `reason` field already follows.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "ProjectScopeRejectionRecord",
+        "claim_id": claim_id,
+        "project_id": project_id,
         "reason_code": reason_code,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
