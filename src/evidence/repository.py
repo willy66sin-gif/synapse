@@ -62,15 +62,23 @@ async def fetch_adjudication_records_in_range(
     an indexed WHERE clause if this table ever grows large.
 
     project_id (2026-09-15, Ring-Fencing Concept Note -- Willy-authorized
-    implementation): optional, defaults None (unfiltered -- every
-    project's records, the existing behavior, unchanged). When given,
+    implementation; billing scope LOCKED 2026-09-15, see CLAUDE.md's
+    Changelog): optional, defaults None (unfiltered -- every project's
+    records). This is the correct default, not a placeholder pending a
+    later decision -- Hamilton Labs bills the client relationship as a
+    whole, not per project, so the unfiltered, relationship-level read
+    is what every real billing statement actually needs.
+    generate_and_send_if_due() (src/billing/service.py), the only
+    caller in the automatic scheduled/event-triggered pipeline, always
+    calls this with project_id omitted, by design, and that is not
+    expected to change. The parameter exists for Hamilton Labs' own
+    internal analysis/tracking (e.g. an ad hoc per-project breakdown
+    run outside the automatic pipeline) -- it is not a client-facing
+    per-project billing feature and is not wired into one. When given,
     filters to records whose claim's project_id (read from
     record["input_payload"]["project_id"], the same nested-JSON read
     pattern already used for evaluated_at above -- AdjudicationAuditEntry
-    has no dedicated project_id column either) matches. Left optional
-    rather than required in this pass -- see this pass's own handoff
-    report for the assessment of whether that's the right default going
-    forward; not decided unilaterally here.
+    has no dedicated project_id column either) matches.
     """
     result = await session.execute(select(AdjudicationAuditEntry).order_by(AdjudicationAuditEntry.id.asc()))
     rows = result.scalars().all()
