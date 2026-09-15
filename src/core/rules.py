@@ -96,16 +96,33 @@ class ZoneRecord:
 SENSOR_ELIGIBLE_ZONE_FIELDS = frozenset({"active_crane", "tagged_asset_present"})
 
 
-def sensor_zone_redis_key(zone_id: str) -> str:
+def sensor_zone_redis_key(project_id: str, zone_id: str) -> str:
     """
     Redis key for verified-telemetry-sourced zone field values,
-    distinct from the human-declared `zone:{zone_id}` hash
+    distinct from the human-declared `zone:{project_id}:{zone_id}` hash
     src/core/repository.py's fetch_zone_record() already reads. Pure
     string formatting, no I/O -- both src/core/repository.py (reader)
     and src/telemetry/zone_write.py (writer) import this single
     definition so the two sides can never drift on the key format.
+
+    project_id (2026-09-15, telemetry project-scoping follow-on --
+    closes the gap the prior project-scoping pass flagged and left open:
+    see CLAUDE.md's Changelog). Mirrors the human-declared zone key's own
+    project_id namespacing exactly (`zone:{zone_id}` -> `zone:{project_id}:{zone_id}`,
+    same prior pass) -- this key moves from `zone:{zone_id}:sensor` to
+    `zone:{project_id}:{zone_id}:sensor` for the identical reason: a
+    verified-telemetry write for one project's zone must not be
+    readable as, or overwrite, another project's same-named zone.
+    Cross-project telemetry isolation is enforced here, at the key
+    level, by construction -- the same choice already made for the
+    human-declared key -- not via a separate exception/reason-code
+    check, since (unlike an issuer's authorized-projects list or a
+    Certified Profile's own project_id) there is no independent "this
+    zone belongs to project X" record anywhere in this codebase to
+    validate a payload's declared project_id against; a zone's project
+    membership IS its key, not a separate fact about it.
     """
-    return f"zone:{zone_id}:sensor"
+    return f"zone:{project_id}:{zone_id}:sensor"
 
 
 @dataclass(frozen=True)

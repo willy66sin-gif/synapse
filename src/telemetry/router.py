@@ -76,6 +76,7 @@ async def submit_zone_state(
         evidence = await write_sensor_zone_state(
             session,
             redis_client,
+            request.project_id,
             request.device_id,
             request.zone_id,
             request.field,

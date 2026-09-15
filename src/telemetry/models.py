@@ -71,6 +71,11 @@ class SensorZoneStateAuditEntry(Base):
     __tablename__ = "sensor_zone_state_records"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # Project-scoping boundary (2026-09-15, telemetry follow-on to the
+    # Ring-Fencing Concept Note pass): pulled out as its own column,
+    # same "discriminator a reader most needs" convention as zone_id/
+    # device_id below, not left buried only in `record`'s JSON.
+    project_id: Mapped[str] = mapped_column(index=True)
     zone_id: Mapped[str] = mapped_column(index=True)
     device_id: Mapped[str]
     record: Mapped[dict] = mapped_column(JSON)
@@ -113,6 +118,9 @@ class SensorZoneStateRejectionAuditEntry(Base):
     __tablename__ = "sensor_zone_state_rejection_records"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # Project-scoping boundary (2026-09-15, telemetry follow-on): see
+    # SensorZoneStateAuditEntry's identical addition, above.
+    project_id: Mapped[str] = mapped_column(index=True)
     zone_id: Mapped[str] = mapped_column(index=True)
     device_id: Mapped[str]
     reason_code: Mapped[str]

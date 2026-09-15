@@ -39,6 +39,36 @@ this module's scope entirely. TelemetrySignatureInvalidError maps
 cleanly to "Cryptographic assurance unknown" (UNVERIFIED SOURCE).
 DeviceNotRegisteredError's mapping is an open question, not decided
 here -- flagged in the design conversation, not resolved by this file.
+
+Device identity stays global, NOT project-scoped (2026-09-15, telemetry
+project-scoping follow-on -- a real design fork, decided here, not
+silently picked). DeviceRegistryEntry (src/telemetry/models.py) has no
+project_id column, and this module's verify_telemetry() takes none --
+a registered device's Ed25519 keypair verifies its identity
+unconditionally, regardless of which project a given payload's
+TelemetryZoneStatePayload.project_id (src/telemetry/schemas.py) names.
+Deliberate, for two reasons: (1) a physical sensor is a piece of
+hardware with one keypair; the project it happens to be reporting for
+today is a deployment fact about where it's currently installed, not an
+identity fact about the device itself -- the real-world precedent is
+equipment (e.g. a crane's telemetry unit) moving between sites/projects
+over its service life without needing a new keypair issued each time,
+the same "identity vs. assignment" distinction CLAUDE.md's Open Items
+already draws for AuthorizedIssuer.role (a job-title string, never a
+verified credential) vs. AuthorityRoleType (an actual checked role).
+(2) Project scoping's actual protection already lives one layer up, at
+the payload/zone level: TelemetryZoneStatePayload.project_id is a
+required, fail-closed field, and src/core/rules.py's
+sensor_zone_redis_key(project_id, zone_id) namespaces every write by
+it -- a device-level project field would be a second, redundant
+boundary on top of that, and a more restrictive one that breaks the
+moving-equipment case for no corresponding gain in the one place a
+leak could actually happen (a wrong project_id in the payload, which
+the key namespacing already contains). If a future need arises to
+restrict which devices may report for which projects specifically
+(e.g. a stolen or decommissioned device's key still verifying but no
+longer trusted for any project), that is a distinct, not-yet-designed
+question -- not solved as a side effect of this pass.
 """
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization

@@ -21,6 +21,7 @@ from src.main import app
 from tests.test_telemetry_zone_write import (
     DEVICE_ID,
     PAYLOAD,
+    PROJECT_ID,
     RFID_DEVICE_ID,
     RFID_PAYLOAD,
     ZONE_ID,
@@ -50,13 +51,22 @@ def _clear_overrides():
 
 async def _seeded_redis() -> _FakeRedis:
     redis_client = _FakeRedis()
-    await redis_client.hset(f"zone:{ZONE_ID}", "hazard_level", "LOW")
-    await redis_client.hset(f"zone:{ZONE_ID}", "active_crane", "false")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "hazard_level", "LOW")
+    await redis_client.hset(f"zone:{PROJECT_ID}:{ZONE_ID}", "active_crane", "false")
     return redis_client
 
 
-def _body(device_id=DEVICE_ID, zone_id=ZONE_ID, field="active_crane", value=True, payload=PAYLOAD, signature=b""):
+def _body(
+    project_id=PROJECT_ID,
+    device_id=DEVICE_ID,
+    zone_id=ZONE_ID,
+    field="active_crane",
+    value=True,
+    payload=PAYLOAD,
+    signature=b"",
+):
     return {
+        "project_id": project_id,
         "device_id": device_id,
         "zone_id": zone_id,
         "field": field,
@@ -80,6 +90,7 @@ async def test_registered_device_success_returns_200_with_sensor_zone_state_evid
     body = response.json()
     assert body["type"] == "SensorZoneStateRecord"
     assert body["source"] == "VERIFIED_TELEMETRY"
+    assert body["project_id"] == PROJECT_ID
     assert body["device_id"] == DEVICE_ID
     assert body["zone_id"] == ZONE_ID
     assert body["field"] == "active_crane"
@@ -179,3 +190,57 @@ def test_non_base64_payload_returns_422():
         response = client.post("/telemetry/zone-state", json=body)
 
     assert response.status_code == 422
+
+
+# --- Project-scoping boundary (2026-09-15, telemetry follow-on) ---
+
+
+def test_missing_project_id_is_rejected_with_a_plain_structural_422():
+    """project_id is a required TelemetryZoneStatePayload field -- a
+    request omitting it entirely never reaches submit_zone_state()'s
+    body at all, rejected by FastAPI/Pydantic before any application
+    code runs. Same structural-rejection class as
+    tests/test_airlock_project.py's identical claim-level test."""
+    session = _StubSession(None)
+    redis_client = _FakeRedis()
+
+    body = _body(signature=b"x")
+    del body["project_id"]
+
+    with _client_with_stubs(session, redis_client) as client:
+        response = client.post("/telemetry/zone-state", json=body)
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
+@pytest.mark.asyncio
+async def test_write_for_one_project_does_not_leak_into_another_projects_zone_state():
+    """Cross-project isolation is enforced by construction, at the Redis
+    key level (src/core/rules.py's sensor_zone_redis_key(project_id,
+    zone_id)) -- not via a separate exception/reason-code check (see
+    that function's own docstring for why no independent "zone's actual
+    project" record exists to validate a mismatch against). This is the
+    positive proof of that property: a verified write declaring
+    project_id="PROJ-OTHER" for the same zone_id must not be visible
+    when reading PROJECT_ID's zone state back."""
+    private_key, public_pem = _generate_keypair()
+    signature = private_key.sign(PAYLOAD)
+    session = _StubSession(public_pem)
+    redis_client = await _seeded_redis()  # seeds PROJECT_ID's zone, active_crane=false
+
+    with _client_with_stubs(session, redis_client) as client:
+        response = client.post(
+            "/telemetry/zone-state", json=_body(project_id="PROJ-OTHER", signature=signature)
+        )
+
+    assert response.status_code == 200
+    assert response.json()["project_id"] == "PROJ-OTHER"
+
+    from src.core.repository import fetch_zone_record
+
+    own_project_zone = await fetch_zone_record(redis_client, PROJECT_ID, ZONE_ID)
+    assert own_project_zone.active_crane is False  # unaffected by the other project's write
+
+    other_project_zone = await fetch_zone_record(redis_client, "PROJ-OTHER", ZONE_ID)
+    assert other_project_zone is None  # no human-declared zone exists there at all

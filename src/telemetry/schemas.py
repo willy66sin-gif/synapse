@@ -29,6 +29,17 @@ class TelemetryZoneStatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device_id: str
+    # Project-scoping boundary (2026-09-15, telemetry follow-on to the
+    # Ring-Fencing Concept Note pass -- closes the gap that pass's Open
+    # Items entry flagged, see CLAUDE.md's Changelog). Required, no
+    # default, same extra="forbid" posture as every other field on this
+    # schema and as ClaimPayload.project_id (src/airlock/schemas.py) --
+    # a telemetry write must declare which project's zone it targets,
+    # same fail-closed discipline as a claim declaring which project it
+    # belongs to. Device identity itself stays global/unscoped -- see
+    # src/telemetry/trust.py's module docstring for that design fork and
+    # why.
+    project_id: str
     zone_id: str
     field: str
     value: bool
