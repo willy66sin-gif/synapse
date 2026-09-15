@@ -43,6 +43,11 @@ class CertifiedProfileRecord(Base):
     __tablename__ = "certified_profiles"
 
     profile_id: Mapped[str] = mapped_column(primary_key=True)
+    # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note --
+    # Willy-authorized implementation). See src/profiles/schemas.py's
+    # CertifiedProfile.project_id for why this is a separate field from
+    # jurisdiction_code, not an overload of it.
+    project_id: Mapped[str]
     jurisdiction_code: Mapped[str]
     version: Mapped[str]
     lineage: Mapped[ProfileLineage] = mapped_column(SAEnum(ProfileLineage))

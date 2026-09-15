@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 import src.airlock.router as airlock_router
 from src.airlock.schemas import WorkType
-from src.core.models import AuthorizedIssuer
+from src.core.models import AuthorizedIssuer, IssuerProject, IssuerRole
 from src.core.repository import get_db_session, get_redis_client
 from src.core.roles import AuthorityRoleType
 from src.main import app
@@ -42,37 +42,49 @@ VALID_LOW_HAZARD_ZONE = {"hazard_level": "LOW", "active_crane": "false"}
 
 class _StubResult:
     """
-    Backs both fetch_issuer_record()'s scalar_one_or_none() query shape
-    and (2026-08-27, Authority Admissibility handoff) fetch_issuer_roles()'s
-    scalars().all() shape -- one canned result object serving both,
-    same "canned regardless of statement shape" convention this stub
-    already used before this addition, extended to a second shape now
-    that the router calls a second query.
+    Backs fetch_issuer_record()'s scalar_one_or_none() query shape and
+    fetch_issuer_roles()'s / fetch_issuer_projects()'s scalars().all()
+    shapes. One canned value per constructed result object -- dispatched
+    by entity in _StubSession.execute() below (2026-09-15, project-
+    scoping boundary: IssuerRole and IssuerProject are both
+    scalars().all()-shaped, so a single shared result object can no
+    longer serve both by method alone, unlike before this pass).
     """
 
-    def __init__(self, row, roles):
-        self._row = row
-        self._roles = roles
+    def __init__(self, value):
+        self._value = value
 
     def scalar_one_or_none(self):
-        return self._row
+        return self._value
 
     def scalars(self):
         return self
 
     def all(self):
-        return self._roles
+        return self._value
 
 
 class _StubSession:
-    def __init__(self, issuer_row=None, issuer_roles=None):
+    def __init__(self, issuer_row=None, issuer_roles=None, issuer_projects=None):
         self._issuer_row = issuer_row
         self._issuer_roles = issuer_roles or []
+        # Project-scoping boundary (2026-09-15): defaults to the same
+        # project every _claim() fixture below declares
+        # ("PROJ-TEST-01"), so existing tests that don't care about
+        # project scoping keep passing check_project_scope() unchanged.
+        self._issuer_projects = issuer_projects if issuer_projects is not None else ["PROJ-TEST-01"]
         self.added = []
         self.committed = False
 
     async def execute(self, stmt):
-        return _StubResult(self._issuer_row, self._issuer_roles)
+        entity = stmt.column_descriptions[0]["entity"]
+        if entity is AuthorizedIssuer:
+            return _StubResult(self._issuer_row)
+        if entity is IssuerRole:
+            return _StubResult(self._issuer_roles)
+        if entity is IssuerProject:
+            return _StubResult(self._issuer_projects)
+        raise AssertionError(f"submit_claim() issued an unexpected query: {stmt}")
 
     def add(self, obj):
         self.added.append(obj)
@@ -109,9 +121,9 @@ def maestro_calls(monkeypatch):
     return calls
 
 
-def _client_with_stubs(issuer_row=None, zone_data=None, issuer_roles=None):
+def _client_with_stubs(issuer_row=None, zone_data=None, issuer_roles=None, issuer_projects=None):
     async def _override_db_session():
-        yield _StubSession(issuer_row=issuer_row, issuer_roles=issuer_roles)
+        yield _StubSession(issuer_row=issuer_row, issuer_roles=issuer_roles, issuer_projects=issuer_projects)
 
     async def _override_redis_client():
         yield _StubRedis(zone_data=zone_data)
@@ -131,6 +143,7 @@ def _claim(**overrides) -> dict:
     base = {
         "claim_id": "CLM-201",
         "timestamp": "2026-07-31T10:00:00Z",
+        "project_id": "PROJ-TEST-01",
         "issuer_id": "USR-SUP-01",
         "authority_level": 3,
         "zone_id": "ZONE-01",

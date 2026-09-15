@@ -16,6 +16,7 @@ from src.profiles.schemas import BaseProfileRef, CertifiedProfile, ProfileLineag
 
 BASE = CertifiedProfile(
     profile_id="EUROCODE-EC2-1-1",
+    project_id="PROJ-TEST-01",
     jurisdiction_code="EU",
     version="2004+A1:2014",
     lineage=ProfileLineage.STANDALONE,
@@ -25,6 +26,7 @@ BASE = CertifiedProfile(
 
 ANNEX = CertifiedProfile(
     profile_id="DE-EC2-ANNEX",
+    project_id="PROJ-TEST-01",
     jurisdiction_code="DE",
     version="2024",
     lineage=ProfileLineage.BASE_ANNEX,
@@ -54,6 +56,7 @@ def test_base_annex_profile_with_no_base_supplied_raises_missing_error():
 def test_base_annex_profile_with_wrong_base_supplied_raises_mismatch_error():
     wrong_base = CertifiedProfile(
         profile_id="EUROCODE-EC3-1-1",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="EU",
         version="2005",
         lineage=ProfileLineage.STANDALONE,
@@ -68,6 +71,7 @@ def test_base_annex_profile_with_wrong_base_supplied_raises_mismatch_error():
 def test_base_annex_profile_with_correct_id_but_wrong_pinned_version_raises_mismatch_error():
     stale_base = CertifiedProfile(
         profile_id="EUROCODE-EC2-1-1",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="EU",
         version="1992-1-1",  # earlier, unpinned version -- must not silently resolve against it
         lineage=ProfileLineage.STANDALONE,

@@ -16,6 +16,7 @@ from src.profiles.schemas import BaseProfileRef, CertifiedProfile, ProfileLineag
 def test_standalone_profile_with_no_base_ref_is_valid():
     profile = CertifiedProfile(
         profile_id="SG-BC-2024",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="SG",
         version="2024",
         lineage=ProfileLineage.STANDALONE,
@@ -29,6 +30,7 @@ def test_standalone_profile_with_no_base_ref_is_valid():
 def test_base_annex_profile_with_a_base_ref_is_valid():
     profile = CertifiedProfile(
         profile_id="DE-EC2-ANNEX",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="DE",
         version="2024",
         lineage=ProfileLineage.BASE_ANNEX,
@@ -44,6 +46,7 @@ def test_base_annex_profile_with_no_base_ref_is_rejected():
     with pytest.raises(ValidationError, match="BASE_ANNEX profile must set base_ref"):
         CertifiedProfile(
             profile_id="DE-EC2-ANNEX",
+            project_id="PROJ-TEST-01",
             jurisdiction_code="DE",
             version="2024",
             lineage=ProfileLineage.BASE_ANNEX,
@@ -56,6 +59,7 @@ def test_standalone_profile_with_a_base_ref_is_rejected():
     with pytest.raises(ValidationError, match="STANDALONE profile must not set base_ref"):
         CertifiedProfile(
             profile_id="SG-BC-2024",
+            project_id="PROJ-TEST-01",
             jurisdiction_code="SG",
             version="2024",
             lineage=ProfileLineage.STANDALONE,
@@ -76,8 +80,25 @@ def test_missing_accountable_architect_is_rejected():
     with pytest.raises(ValidationError):
         CertifiedProfile(
             profile_id="SG-BC-2024",
+            project_id="PROJ-TEST-01",
             jurisdiction_code="SG",
             version="2024",
             lineage=ProfileLineage.STANDALONE,
             parameters={"max_span_m": 12.0},
+        )
+
+
+def test_missing_project_id_is_rejected():
+    """Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note):
+    same fail-closed posture as jurisdiction_code/accountable_architect
+    above -- a Certified Profile with no declared project is rejected at
+    the schema boundary, not defaulted."""
+    with pytest.raises(ValidationError):
+        CertifiedProfile(
+            profile_id="SG-BC-2024",
+            jurisdiction_code="SG",
+            version="2024",
+            lineage=ProfileLineage.STANDALONE,
+            parameters={"max_span_m": 12.0},
+            accountable_architect="Jane Tan, ARB-1234",
         )

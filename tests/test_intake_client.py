@@ -12,6 +12,7 @@ from src.intake.client import submit_claim
 CLAIM = ClaimPayload(
     claim_id="CLM-EPTW-001",
     timestamp="2026-08-09T10:15:00+00:00",
+    project_id="PROJ-DEMO-01",
     issuer_id="USR-SUP-01",
     authority_level=3,
     zone_id="ZONE-01",

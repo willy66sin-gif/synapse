@@ -89,6 +89,17 @@ class ClaimPayload(BaseModel):
 
     claim_id: str
     timestamp: str
+    # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note,
+    # 26 Aug 2026 -- Willy-authorized implementation). Required, no
+    # default -- same fail-closed posture as work_type, not the
+    # deliberately-optional profile_id: every claim must declare which
+    # project's data it belongs to, full stop. A NEW, dedicated field --
+    # not an overload of profile_id (src/profiles/schemas.py's
+    # CertifiedProfile.project_id, below): profile_id identifies which
+    # doctrine/rules govern a claim, project_id identifies which
+    # client/project the data belongs to. See src/airlock/project_check.py
+    # for the cross-project reference check this field feeds.
+    project_id: str
     issuer_id: str
     # DEPRECATED (2026-08-28, Legacy authority_level/clearance_level
     # discovery pass): retained on this schema for backward API

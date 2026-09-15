@@ -42,7 +42,7 @@ async def fetch_latest_adjudication_record(session: AsyncSession, claim_id: str)
 
 
 async def fetch_adjudication_records_in_range(
-    session: AsyncSession, period_start: datetime, period_end: datetime
+    session: AsyncSession, period_start: datetime, period_end: datetime, project_id: Optional[str] = None
 ) -> list[dict]:
     """
     Every persisted AdjudicationRecord whose evaluated_at falls within
@@ -60,6 +60,17 @@ async def fetch_adjudication_records_in_range(
     project's current stage (no production data volume, per
     CLAUDE.md's Developer Directives) -- would need a real column and
     an indexed WHERE clause if this table ever grows large.
+
+    project_id (2026-09-15, Ring-Fencing Concept Note -- Willy-authorized
+    implementation): optional, defaults None (unfiltered -- every
+    project's records, the existing behavior, unchanged). When given,
+    filters to records whose claim's project_id (read from
+    record["input_payload"]["project_id"], the same nested-JSON read
+    pattern already used for evaluated_at above -- AdjudicationAuditEntry
+    has no dedicated project_id column either) matches. Left optional
+    rather than required in this pass -- see this pass's own handoff
+    report for the assessment of whether that's the right default going
+    forward; not decided unilaterally here.
     """
     result = await session.execute(select(AdjudicationAuditEntry).order_by(AdjudicationAuditEntry.id.asc()))
     rows = result.scalars().all()
@@ -67,4 +78,5 @@ async def fetch_adjudication_records_in_range(
         row.record
         for row in rows
         if period_start <= datetime.fromisoformat(row.record["evaluated_at"]) < period_end
+        and (project_id is None or row.record.get("input_payload", {}).get("project_id") == project_id)
     ]

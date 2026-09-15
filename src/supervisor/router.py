@@ -212,7 +212,7 @@ async def blocked_screen_status(
     claim = ClaimPayload(**evidence["input_payload"])
 
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
-    zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    zone_record = await fetch_zone_record(redis_client, claim.project_id, claim.zone_id)
     issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
     certified_profile = None
     if claim.profile_id is not None:

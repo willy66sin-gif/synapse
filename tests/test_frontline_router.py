@@ -198,6 +198,7 @@ STALE_GO_EVIDENCE = {
     "input_payload": {
         "claim_id": "CLM-FRESH-401",
         "timestamp": "2026-08-30T09:00:00Z",
+        "project_id": "PROJ-TEST-01",
         "issuer_id": "USR-SUP-01",
         "authority_level": 3,
         "zone_id": "ZONE-01",
@@ -571,6 +572,7 @@ STALE_GO_EVIDENCE_WITH_PROFILE = {
 
 VALID_PROFILE_ROW = CertifiedProfileRecord(
     profile_id="SG-BC-2024",
+    project_id="PROJ-TEST-01",
     jurisdiction_code="SG",
     version="2024.1",
     lineage=ProfileLineage.STANDALONE,

@@ -41,6 +41,7 @@ async def test_fetch_certified_profile_returns_none_for_an_unregistered_profile(
 async def test_fetch_certified_profile_returns_a_standalone_profile():
     row = CertifiedProfileRecord(
         profile_id="SG-BC-2024",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="SG",
         version="2024",
         lineage=ProfileLineage.STANDALONE,
@@ -63,6 +64,7 @@ async def test_fetch_certified_profile_returns_a_standalone_profile():
 async def test_fetch_certified_profile_returns_a_base_annex_profile_with_base_ref():
     row = CertifiedProfileRecord(
         profile_id="DE-EC2-ANNEX",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="DE",
         version="2024",
         lineage=ProfileLineage.BASE_ANNEX,

@@ -186,6 +186,7 @@ def test_from_evidence_record_carries_eptw_reason_code_through():
     claim = ClaimPayload(
         claim_id=claim_payload["claim_id"],
         timestamp="2026-07-31T10:00:00Z",
+        project_id="PROJ-TEST-01",
         issuer_id=claim_payload["issuer_id"],
         authority_level=3,
         zone_id="ZONE-01",
@@ -230,6 +231,7 @@ def _claim(claim_id: str, issuer_id: str, zone_id: str = "ZONE-01"):
     return ClaimPayload(
         claim_id=claim_id,
         timestamp="2026-07-27T10:00:00Z",
+        project_id="PROJ-TEST-01",
         issuer_id=issuer_id,
         authority_level=3,
         zone_id=zone_id,

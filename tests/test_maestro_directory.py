@@ -365,6 +365,7 @@ def test_resolve_pa_authority_reads_the_certified_profiles_accountable_architect
     binding's contact_id."""
     profile = CertifiedProfile(
         profile_id="SG-BC-2024",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="SG",
         version="2024",
         lineage=ProfileLineage.STANDALONE,
@@ -386,6 +387,7 @@ def test_resolve_pa_authority_varies_by_project_not_a_fixed_catalog_entry():
     assignment is per-project, not a shared static role."""
     profile_a = CertifiedProfile(
         profile_id="SG-BC-2024",
+        project_id="PROJ-TEST-01",
         jurisdiction_code="SG",
         version="2024",
         lineage=ProfileLineage.STANDALONE,
@@ -394,6 +396,7 @@ def test_resolve_pa_authority_varies_by_project_not_a_fixed_catalog_entry():
     )
     profile_b = CertifiedProfile(
         profile_id="DE-EC2-ANNEX",
+        project_id="PROJ-TEST-02",
         jurisdiction_code="DE",
         version="2024",
         lineage=ProfileLineage.BASE_ANNEX,

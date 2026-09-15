@@ -25,6 +25,21 @@ can be part of the signed evidence record itself, not appended after
 signing. OutboundAlert.from_evidence_record() resolves authority again
 internally for the alert's fields — a second call to the same pure,
 deterministic lookup, not a second decision; see its docstring.
+
+Project scoping (2026-09-15, Ring-Fencing Concept Note, 26 Aug 2026 --
+Willy-authorized implementation): src/airlock/project_check.py's
+check_project_scope() runs after the profile_id check above and before
+adjudicate() -- a cross-project reference (a resolved profile or a
+recognized-but-not-this-project issuer) is rejected here with its own
+reason_code (R-PROJECT-01), its own evidence record type, and its own
+audit table, the same two-tier structure the profile_id check already
+established. A claim missing project_id entirely never reaches this
+function body at all -- it's a required ClaimPayload field, rejected at
+the plain Pydantic 422 boundary, same mechanism as every other required
+field. See src/airlock/project_check.py's module docstring for why zone
+project isolation is enforced separately (at the Redis key level,
+src/core/repository.py's fetch_zone_record()) rather than duplicated as
+a third branch here.
 """
 from dataclasses import asdict
 
@@ -37,19 +52,25 @@ from src.airlock.profile_check import (
     ProfileIdUnresolvableError,
     check_profile_requirement,
 )
-from src.airlock.repository import persist_profile_rejection_record
+from src.airlock.project_check import ProjectScopeViolationError, check_project_scope
+from src.airlock.repository import persist_profile_rejection_record, persist_project_scope_rejection_record
 from src.airlock.schemas import ClaimPayload
 from src.billing.service import on_claim_finalized
 from src.config import settings
 from src.core.evaluator import adjudicate
 from src.core.repository import (
+    fetch_issuer_projects,
     fetch_issuer_record,
     fetch_issuer_roles,
     fetch_zone_record,
     get_db_session,
     get_redis_client,
 )
-from src.evidence.emitter import emit_evidence, emit_profile_rejection_evidence
+from src.evidence.emitter import (
+    emit_evidence,
+    emit_profile_rejection_evidence,
+    emit_project_scope_rejection_evidence,
+)
 from src.evidence.repository import persist_adjudication_record
 from src.maestro.adapters.telegram import TelegramAdapter
 from src.maestro.adapters.whatsapp import WhatsAppAdapter
@@ -109,7 +130,24 @@ async def submit_claim(
         ) from exc
 
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
-    zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note --
+    # Willy-authorized implementation): fetched unconditionally, same
+    # pattern as issuer_record/zone_record/issuer_roles -- an
+    # already-fetched list src/airlock/project_check.py's
+    # check_project_scope() consults, not a second I/O boundary inside
+    # that pure function.
+    issuer_projects = await fetch_issuer_projects(session, claim.issuer_id)
+
+    try:
+        project_outcome = check_project_scope(claim.project_id, profile, issuer_record, issuer_projects)
+    except ProjectScopeViolationError as exc:
+        rejection_evidence = emit_project_scope_rejection_evidence(claim.claim_id, claim.project_id, exc.reason_code)
+        await persist_project_scope_rejection_record(session, rejection_evidence)
+        raise HTTPException(
+            status_code=422, detail={"reason_code": exc.reason_code, "message": str(exc)}
+        ) from exc
+
+    zone_record = await fetch_zone_record(redis_client, claim.project_id, claim.zone_id)
     # 2026-08-27, Authority Admissibility handoff: fetch_issuer_roles()
     # was already built and tested but unread until now -- resolved
     # unconditionally, same pattern as issuer_record/zone_record above
@@ -130,6 +168,9 @@ async def submit_claim(
     # GO Freshness Phase 3a, Part A: appended here, not inside
     # adjudicate() -- see this function's own docstring above.
     verdict["rule_trace"].append(asdict(profile_outcome))
+    # Project-scoping boundary (2026-09-15): same "append here, not
+    # inside adjudicate()" convention as profile_outcome above.
+    verdict["rule_trace"].append(asdict(project_outcome))
 
     authority_binding_id = None
     if verdict["decision"] == "NO_GO":

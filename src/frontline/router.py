@@ -170,7 +170,7 @@ async def frontline_status_json(
     claim = ClaimPayload(**evidence["input_payload"])
 
     issuer_record = await fetch_issuer_record(session, claim.issuer_id)
-    zone_record = await fetch_zone_record(redis_client, claim.zone_id)
+    zone_record = await fetch_zone_record(redis_client, claim.project_id, claim.zone_id)
     issuer_roles = await fetch_issuer_roles(session, claim.issuer_id)
     # GO Freshness Phase 3a, Part B (2026-08-31): same fresh-every-call
     # pattern as the three fetches above -- None when the claim has no

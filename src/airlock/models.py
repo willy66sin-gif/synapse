@@ -46,3 +46,26 @@ class ProfileRejectionAuditEntry(Base):
     profile_id: Mapped[Optional[str]]
     reason_code: Mapped[str]
     record: Mapped[dict] = mapped_column(JSON)
+
+
+class ProjectScopeRejectionAuditEntry(Base):
+    """
+    Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note,
+    26 Aug 2026 -- Willy-authorized implementation): audit trail for a
+    claim rejected at the Airlock stage because a cross-project
+    reference was detected (its resolved profile or issuer belongs to a
+    different project_id than the claim declared) -- see
+    src/airlock/project_check.py's module docstring for the full design.
+    Mirrors ProfileRejectionAuditEntry exactly, above, same "distinct
+    evidence types live in distinct tables" convention, same reasoning:
+    a project-scope rejection happens before adjudicate() is ever
+    called, so there is no Verdict to attach it to.
+    """
+
+    __tablename__ = "project_scope_rejection_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    claim_id: Mapped[str] = mapped_column(index=True)
+    project_id: Mapped[str]
+    reason_code: Mapped[str]
+    record: Mapped[dict] = mapped_column(JSON)

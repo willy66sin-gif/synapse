@@ -20,6 +20,7 @@ from src.main import app
 VALID_CLAIM = {
     "claim_id": "CLM-101",
     "timestamp": "2026-07-27T10:00:00Z",
+    "project_id": "PROJ-TEST-01",
     "issuer_id": "USR-SUP-01",
     "authority_level": 3,
     "zone_id": "ZONE-01",

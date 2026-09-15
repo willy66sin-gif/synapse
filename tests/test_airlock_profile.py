@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from src.airlock.models import ProfileRejectionAuditEntry
 from src.airlock.schemas import WorkType
 from src.config import settings
-from src.core.models import AuthorizedIssuer, IssuerRole
+from src.core.models import AuthorizedIssuer, IssuerProject, IssuerRole
 from src.core.repository import get_db_session, get_redis_client
 from src.core.roles import AuthorityRoleType
 from src.main import app
@@ -28,8 +28,14 @@ SUPERINTENDENT_ROW = AuthorizedIssuer(issuer_id="USR-SUP-01", role="SUPERINTENDE
 SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
 VALID_LOW_HAZARD_ZONE = {"hazard_level": "LOW", "active_crane": "false"}
 
+# Project-scoping boundary (2026-09-15): the claim's project_id
+# (_claim()'s base dict, below) and this profile's project_id must
+# agree for these grace-period/profile-flag tests to stay about
+# profile_id, not accidentally trip R-PROJECT-01 -- see
+# test_airlock_project.py for the dedicated cross-project tests.
 VALID_PROFILE_ROW = CertifiedProfileRecord(
     profile_id="SG-BC-2024",
+    project_id="PROJ-TEST-01",
     jurisdiction_code="SG",
     version="2024.1",
     lineage=ProfileLineage.STANDALONE,
@@ -62,10 +68,15 @@ class _StubSession:
     persisted (an AdjudicationAuditEntry on the normal path, a
     ProfileRejectionAuditEntry on a fail-closed profile rejection)."""
 
-    def __init__(self, issuer_row=None, issuer_roles=None, profile_row=None):
+    def __init__(self, issuer_row=None, issuer_roles=None, profile_row=None, issuer_projects=None):
         self._issuer_row = issuer_row
         self._issuer_roles = issuer_roles or []
         self._profile_row = profile_row
+        # Project-scoping boundary (2026-09-15): defaults to the same
+        # project _claim()'s base dict declares, so existing tests here
+        # (which are about profile_id, not project scoping) keep passing
+        # check_project_scope() unchanged.
+        self._issuer_projects = issuer_projects if issuer_projects is not None else ["PROJ-TEST-01"]
         self.added = []
         self.committed = 0
 
@@ -75,6 +86,8 @@ class _StubSession:
             return _Result(row=self._issuer_row)
         if entity is IssuerRole:
             return _Result(rows=self._issuer_roles)
+        if entity is IssuerProject:
+            return _Result(rows=self._issuer_projects)
         if entity is CertifiedProfileRecord:
             return _Result(row=self._profile_row)
         raise AssertionError(f"unexpected query in test_airlock_profile.py stub: {stmt}")
@@ -128,6 +141,7 @@ def _claim(**overrides) -> dict:
     base = {
         "claim_id": "CLM-PROFILE-501",
         "timestamp": "2026-08-31T10:00:00Z",
+        "project_id": "PROJ-TEST-01",
         "issuer_id": "USR-SUP-01",
         "authority_level": 3,
         "zone_id": "ZONE-01",

@@ -42,6 +42,7 @@ async def fetch_certified_profile(session: AsyncSession, profile_id: str) -> Opt
 
     return CertifiedProfile(
         profile_id=row.profile_id,
+        project_id=row.project_id,
         jurisdiction_code=row.jurisdiction_code,
         version=row.version,
         lineage=row.lineage,

@@ -29,6 +29,14 @@ from pydantic import BaseModel
 class BillingStatement(BaseModel):
     period_start: datetime
     period_end: datetime
+    # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note --
+    # Willy-authorized implementation). Optional, defaults None -- a
+    # None statement covers every project (the pre-existing, unfiltered
+    # behavior); a project_id-scoped statement records which project it
+    # covers, so a reader of a persisted BillingStatementRecord later
+    # can tell the two apart -- an unlabelled scoped statement would be
+    # indistinguishable from a global one.
+    project_id: Optional[str] = None
     # Optional, not defaulted to a placeholder string: None means
     # settings.billing_statement_recipient was never configured --
     # src/billing/email_sender.py's fail-closed check catches that

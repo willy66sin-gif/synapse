@@ -8,7 +8,7 @@ decision gets made; this module does the actual database write.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.airlock.models import ProfileRejectionAuditEntry
+from src.airlock.models import ProfileRejectionAuditEntry, ProjectScopeRejectionAuditEntry
 
 
 async def persist_profile_rejection_record(session: AsyncSession, evidence: dict) -> None:
@@ -22,6 +22,25 @@ async def persist_profile_rejection_record(session: AsyncSession, evidence: dict
         ProfileRejectionAuditEntry(
             claim_id=evidence["claim_id"],
             profile_id=evidence["profile_id"],
+            reason_code=evidence["reason_code"],
+            record=evidence,
+        )
+    )
+    await session.commit()
+
+
+async def persist_project_scope_rejection_record(session: AsyncSession, evidence: dict) -> None:
+    """
+    Appends a signed ProjectScopeRejectionRecord to its own audit trail --
+    never updates or deletes existing rows, same discipline as
+    persist_profile_rejection_record() above (project-scoping boundary,
+    2026-09-15, Ring-Fencing Concept Note -- Willy-authorized
+    implementation).
+    """
+    session.add(
+        ProjectScopeRejectionAuditEntry(
+            claim_id=evidence["claim_id"],
+            project_id=evidence["project_id"],
             reason_code=evidence["reason_code"],
             record=evidence,
         )

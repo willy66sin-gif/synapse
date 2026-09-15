@@ -37,6 +37,7 @@ STALE_GO_EVIDENCE = {
     "input_payload": {
         "claim_id": "CLM-SUP-FRESH-401",
         "timestamp": "2026-08-30T09:00:00Z",
+        "project_id": "PROJ-TEST-01",
         "issuer_id": "USR-SUP-01",
         "authority_level": 3,
         "zone_id": "ZONE-01",

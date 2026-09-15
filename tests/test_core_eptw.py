@@ -58,6 +58,7 @@ def _claim(**overrides) -> ClaimPayload:
     base = {
         "claim_id": "CLM-EPTW-001",
         "timestamp": "2026-07-28T10:00:00Z",
+        "project_id": "PROJ-TEST-01",
         "issuer_id": "USR-SUP-01",
         "authority_level": 3,
         "zone_id": "ZONE-01",

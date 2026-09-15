@@ -20,13 +20,26 @@ from src.billing.schemas import BillingStatement
 
 
 def generate_statement(
-    records: list[dict], period_start: datetime, period_end: datetime, recipient: Optional[str]
+    records: list[dict],
+    period_start: datetime,
+    period_end: datetime,
+    recipient: Optional[str],
+    project_id: Optional[str] = None,
 ) -> BillingStatement:
     """
     records: persisted AdjudicationRecord dicts -- the same shape
     src/evidence/emitter.py's emit_evidence() produces and
     src/evidence/repository.py persists, each carrying at least
     "decision" ("GO"/"NO_GO") and "reason_code" (str or None).
+
+    project_id (2026-09-15, Ring-Fencing Concept Note -- Willy-authorized
+    implementation): does not filter `records` itself -- the caller
+    (src/evidence/repository.py's fetch_adjudication_records_in_range())
+    already did that filtering, if requested, before records reached
+    here; this function stays a pure consolidation step with no I/O,
+    same discipline as before this pass. Threaded through purely so the
+    resulting BillingStatement can record which project (if any) it was
+    scoped to -- see BillingStatement.project_id's own comment.
     """
     go_count = sum(1 for record in records if record["decision"] == "GO")
     no_go_count = sum(1 for record in records if record["decision"] == "NO_GO")
@@ -43,6 +56,7 @@ def generate_statement(
     return BillingStatement(
         period_start=period_start,
         period_end=period_end,
+        project_id=project_id,
         recipient=recipient,
         claims_processed=claims_processed,
         go_count=go_count,

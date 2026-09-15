@@ -166,6 +166,7 @@ wherever `uvicorn` is bound otherwise):
 curl -X POST localhost:8000/airlock/claims -H "Content-Type: application/json" -d '{
   "claim_id": "CLM-DEMO-GO",
   "timestamp": "2026-08-31T10:00:00Z",
+  "project_id": "PROJ-DEMO-01",
   "issuer_id": "USR-SUP-01",
   "authority_level": 3,
   "zone_id": "ZONE-01",
@@ -182,6 +183,7 @@ curl -X POST localhost:8000/airlock/claims -H "Content-Type: application/json" -
 curl -X POST localhost:8000/airlock/claims -H "Content-Type: application/json" -d '{
   "claim_id": "CLM-DEMO-NOGO",
   "timestamp": "2026-08-31T10:00:00Z",
+  "project_id": "PROJ-DEMO-01",
   "issuer_id": "USR-SUP-01",
   "authority_level": 3,
   "zone_id": "ZONE-01",
@@ -230,10 +232,13 @@ This is a **single trusted-reviewer local instance** — one person, one machine
 Docker Compose stack. It is explicitly not a production deployment shape, and it does
 not demonstrate:
 
-- **Multi-tenancy or project scoping.** There is no `project_id` concept anywhere in
-  this codebase — every claim, zone, and issuer lives in one flat namespace. This is a
-  locked architecture decision, not an oversight, and not something this package works
-  around.
+- **Multi-tenancy as an access/authentication boundary.** `project_id` (2026-09-15,
+  Ring-Fencing Concept Note) now exists as a required, fail-closed field on every claim
+  and Certified Profile — see `CLAUDE.md`'s Changelog — but it is a **data-scoping**
+  boundary only: every claim, zone, issuer, and profile still lives in the same single
+  Postgres/Redis instance, and there is still no login or per-reviewer account (see the
+  next bullet). Project scoping stops a claim from silently referencing another
+  project's zone/issuer/profile; it does not add multi-tenant access control.
 - **Any external identity or access model.** There is no login, no per-reviewer
   account, no permission boundary between "you" and "the whole database." Anyone with
   the URL and a terminal can do anything any other user of this instance can.

@@ -17,7 +17,15 @@ Inserts:
   (authority_check) on *every* claim regardless of work_type or zone
   state — there was no way to reach a genuine GO against this seed
   data before this addition).
-- One zone record (Redis) — unchanged since the original pass.
+- One IssuerProject row (2026-09-15, Ring-Fencing Concept Note --
+  Willy-authorized implementation): PROJ-DEMO-01, an obviously-fake
+  project id, same discipline as SEED_PROFILE_ID's "DEMO-PROFILE-01" --
+  without it, the seeded issuer fails src/airlock/project_check.py's
+  check_project_scope() (R-PROJECT-01) on every claim, the same kind of
+  gap the IssuerRole rows above were added to close for authority.
+- One zone record (Redis) — now namespaced by SEED_PROJECT_ID
+  (`zone:{PROJ-DEMO-01}:{ZONE-01}`, 2026-09-15) — see
+  src/core/repository.py's fetch_zone_record().
 - One demo CertifiedProfileRecord (2026-08-31 addition, GO Freshness
   Phase 3a follow-on): closes the "CertifiedProfileRecord has zero
   rows anywhere" gap for THIS seeded/demo instance only — the
@@ -55,7 +63,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.config import settings
-from src.core.models import AuthorizedIssuer, IssuerRole
+from src.core.models import AuthorizedIssuer, IssuerProject, IssuerRole
 from src.core.roles import AuthorityRoleType
 from src.profiles.models import CertifiedProfileRecord
 from src.profiles.schemas import ProfileLineage
@@ -64,6 +72,13 @@ SEED_ISSUER_ID = "USR-SUP-01"
 SEED_ISSUER_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
 SEED_ZONE_ID = "ZONE-01"
 SEED_PROFILE_ID = "DEMO-PROFILE-01"
+# Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note --
+# Willy-authorized implementation). Fixed demo project ID, obviously
+# fake, same "no real regulator/jurisdiction data fabricated" discipline
+# as SEED_PROFILE_ID's "DEMO-PROFILE-01" -- every claim example in
+# README.md's "Seeing a GO and a NO_GO" section must now carry this
+# value in its project_id field, or it fails closed (missing-field 422).
+SEED_PROJECT_ID = "PROJ-DEMO-01"
 
 
 async def seed_postgres() -> None:
@@ -93,6 +108,22 @@ async def seed_postgres() -> None:
             print(f"Seeded IssuerRole {SEED_ISSUER_ID}/{role_type.value}.")
         await session.commit()
 
+        # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note):
+        # without at least one IssuerProject row for SEED_PROJECT_ID, the
+        # seeded issuer fails src/airlock/project_check.py's
+        # check_project_scope() (R-PROJECT-01) on every claim, the same
+        # "no admissible role -> fails every claim" gap the IssuerRole
+        # seed rows above were added to close.
+        existing_projects = await session.execute(
+            select(IssuerProject.project_id).where(IssuerProject.issuer_id == SEED_ISSUER_ID)
+        )
+        if SEED_PROJECT_ID in set(existing_projects.scalars().all()):
+            print(f"IssuerProject {SEED_ISSUER_ID}/{SEED_PROJECT_ID} already present, skipping.")
+        else:
+            session.add(IssuerProject(issuer_id=SEED_ISSUER_ID, project_id=SEED_PROJECT_ID))
+            await session.commit()
+            print(f"Seeded IssuerProject {SEED_ISSUER_ID}/{SEED_PROJECT_ID}.")
+
         existing_profile = await session.execute(
             select(CertifiedProfileRecord).where(CertifiedProfileRecord.profile_id == SEED_PROFILE_ID)
         )
@@ -100,6 +131,7 @@ async def seed_postgres() -> None:
             session.add(
                 CertifiedProfileRecord(
                     profile_id=SEED_PROFILE_ID,
+                    project_id=SEED_PROJECT_ID,
                     jurisdiction_code="DEMO",
                     version="0.1-demo",
                     lineage=ProfileLineage.STANDALONE,
@@ -119,8 +151,11 @@ async def seed_postgres() -> None:
 
 async def seed_redis() -> None:
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
-    await redis_client.hset(f"zone:{SEED_ZONE_ID}", mapping={"hazard_level": "LOW", "active_crane": "false"})
-    print(f"Seeded zone:{SEED_ZONE_ID} in Redis.")
+    # Project-scoping boundary (2026-09-15): zone key now namespaced by
+    # project_id -- see src/core/repository.py's fetch_zone_record().
+    zone_key = f"zone:{SEED_PROJECT_ID}:{SEED_ZONE_ID}"
+    await redis_client.hset(zone_key, mapping={"hazard_level": "LOW", "active_crane": "false"})
+    print(f"Seeded {zone_key} in Redis.")
     await redis_client.aclose()
 
 

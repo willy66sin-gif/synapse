@@ -91,3 +91,37 @@ class IssuerRole(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     issuer_id: Mapped[str] = mapped_column(ForeignKey("authorized_issuers.issuer_id"), index=True)
     role_type: Mapped[AuthorityRoleType] = mapped_column(SAEnum(AuthorityRoleType))
+
+
+class IssuerProject(Base):
+    """
+    One row per (issuer_id, project_id) -- project-scoping boundary
+    (2026-09-15, Ring-Fencing Concept Note, 26 Aug 2026 -- Willy-
+    authorized implementation).
+
+    Deliberately shaped as a join table, not a single project_id column
+    on AuthorizedIssuer, for the same reason IssuerRole (above) is a join
+    table rather than a single role_type column: an issuer working
+    across several client projects is the direct analogue of the
+    real-world precedent that motivated IssuerRole (one person, several
+    independently-checkable roles) -- an issuer is not confined to one
+    project any more than they're confined to one role, and a scalar
+    field couldn't represent "authorized on projects A and C, not B"
+    without forcing one issuer_id per project, which would fight the
+    existing global-issuer-identity model this table already establishes.
+
+    An issuer with zero rows here is simply not authorized under any
+    project -- src/airlock/project_check.py's check_project_scope()
+    fails closed (raises ProjectScopeViolationError, R-PROJECT-01) if a
+    recognized issuer submits a claim under a project_id absent from
+    their rows here. An unrecognized issuer (no AuthorizedIssuer row at
+    all) is a different, pre-existing failure mode (R-AUTH-01) --
+    check_project_scope() does not preempt or duplicate that check, see
+    its own docstring.
+    """
+
+    __tablename__ = "issuer_projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    issuer_id: Mapped[str] = mapped_column(ForeignKey("authorized_issuers.issuer_id"), index=True)
+    project_id: Mapped[str] = mapped_column(index=True)

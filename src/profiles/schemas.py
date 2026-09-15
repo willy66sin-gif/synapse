@@ -70,6 +70,19 @@ class CertifiedProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profile_id: str
+    # Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note --
+    # Willy-authorized implementation). Required, no default, same
+    # fail-closed posture as jurisdiction_code -- a Certified Profile with
+    # no declared project is rejected at the schema boundary, not
+    # defaulted. Deliberately a separate field from jurisdiction_code and
+    # from accountable_architect: jurisdiction_code says which regulator's
+    # code this profile follows, accountable_architect says who is
+    # liable, project_id says which client/project this profile's data
+    # belongs to -- three independent axes, not one overloaded field.
+    # src/airlock/project_check.py compares a claim's project_id against
+    # this field (when the claim names a profile_id) to detect a
+    # cross-project reference.
+    project_id: str
     jurisdiction_code: str
     version: str
     lineage: ProfileLineage
