@@ -13,8 +13,10 @@ The full architecture, coding standards, and locked design decisions live in
   without the rule and failing condition; every channel supports both inbound query
   and outbound push; every alert states an escalation contact).
 - **`## Open Items`** — known gaps and pending proposals that are *not* locked yet
-  (currently: whether ordinary claim adjudications, not just overrides, should also
-  push a Maestro alert).
+  (e.g. binding the authority set to real PEB/MOM/IES/ACES registration data, the
+  Frontline Worker's telemetry/assurance-failure target-state stories, and several
+  smaller not-yet-decided schema questions — see that section for the full, current
+  list rather than this README repeating a single stale example).
 
 This README covers day-to-day operator concerns: running it, testing it, and where
 things stand. It doesn't restate the architecture — `CLAUDE.md` is authoritative for
@@ -30,24 +32,28 @@ Airlock (ingestion, fail-closed schema validation)
 
 `Maestro` (`src/maestro/`) is a separate, fully decoupled delivery layer that can turn
 an Evidence record into a channel-specific outbound alert (WhatsApp/Telegram stub
-adapters included). **`src/airlock/router.py` still does not call it** — an ordinary
-`POST /airlock/claims` produces a signed evidence record but triggers no delivery.
-An accepted admin override *does* trigger a Maestro alert (see below) — that's the
-only live Maestro wiring so far.
+adapters included). `src/airlock/router.py` calls it on every **NO_GO** adjudication
+(any failure class) — a rejected claim always fires a Maestro alert naming the
+resolved escalation authority. A **GO** adjudication deliberately triggers no alert;
+that asymmetry is intentional (see `CLAUDE.md`'s NO_GO Notification Principle), not
+missing wiring. Supervisor override is retired (`POST /supervisor/override` now
+returns `410 Gone` unconditionally — see `CLAUDE.md`'s Supervisor Override
+Retirement), so it no longer triggers anything.
 
 Both the adjudication and the override are now genuinely persisted (append-only) in
 PostgreSQL, not just emitted and forgotten — see `CLAUDE.md`'s Admin-Override
 Evidence Principle.
 
-### Admin override — `POST /supervisor/override`
+### Admin override — `POST /supervisor/override` (RETIRED)
 
-Accepts `{claim_id, issuer_id, justification, timestamp}`. Fail-closed like Airlock
-(422 on malformed input, extra fields forbidden, `justification` can't be empty).
-Business-logic rejections use real HTTP status codes rather than always-200 (unlike
-`/airlock/claims`, where NO_GO is itself a valid outcome): `403` if the issuer isn't
-a known authority, `404` if the claim has no adjudication record to override. On
-acceptance: signs a distinct `OverrideRecord` evidence entry, persists it, and sends
-a Maestro alert (both stub channels) announcing the override.
+Retired entirely, not scoped down — see `CLAUDE.md`'s Supervisor Override Retirement.
+The endpoint now returns `410 Gone` unconditionally (a structurally malformed body
+still 422s at the schema boundary first, unrelated to retirement). A verdict now
+changes only via a new, verifiable claim submitted by the specific authority role
+that owns the gate being changed, re-adjudicated fresh through Core — not an
+administrative action layered on top of an existing verdict. The underlying
+`evaluate_override()`/`OverrideRecord` code is still in the repository, unused by
+the retired route, kept per instruction pending a separate future removal decision.
 
 ## Running it
 
@@ -142,7 +148,58 @@ Two operator-facing screens sit on top of the pipeline above:
   not a blank success screen.
 
 Both read the same signed evidence record; neither invents anything the other
-doesn't already have.
+doesn't already have. Both screens also expose a `GET .../status` polling endpoint
+(`/frontline/blocked/{claim_id}/status`, `/supervisor/blocked/{claim_id}/status`)
+that re-runs real adjudication fresh on every call and writes a signed transition
+record if the verdict actually flips between polls (GO Freshness Phase 1/1b) — this
+is a genuine re-check, not a cached re-render of the original decision.
+
+## Other real modules not shown on either screen
+
+These exist, are wired to a live route, and are covered by the automated suite —
+listed here so this README doesn't undersell (or oversell) what's actually built,
+per `CLAUDE.md`'s own module-by-module changelog:
+
+- **Telemetry** (`src/telemetry/`, `POST /telemetry/zone-state`) — verifies inbound
+  sensor data (an Ed25519-signed payload) genuinely came from a registered device,
+  unaltered in transit, then writes it into the same zone-state Redis structure
+  `adjudicate()` reads, sensor value taking precedence over a human declaration when
+  present. Rejects with `422`/`R-DEV-01` (unregistered device) or `R-DEV-02` (bad
+  signature). No device PKI, hardware attestation, or HSM-backed trust exists beyond
+  the payload signature itself — see `CLAUDE.md`'s Telemetry Transport Security
+  Principle for why that's the locked baseline, not a gap.
+- **Certified Profiles** (`src/profiles/`) — an optional, permanent `profile_id` on
+  a claim can resolve to a `CertifiedProfile` (jurisdiction, code parameters,
+  accountable-architect liability binding). `profile_id_enforcement_enabled`
+  defaults **off**; see "Optional: seeing `profile_id` enforcement," below, for the
+  demo path. No rule in `src/core/rules.py` reads a profile's code parameters yet —
+  resolution is wired, but nothing in adjudication consults it today.
+- **Billing** (`src/billing/`) — generates a statement of adjudication outcome
+  counts (GO/NO_GO tallies by reason code) on a configurable cadence or on a claim
+  event, and emails it via SMTP if fully configured (`SMTP_HOST`/`SMTP_PORT`/etc. in
+  `src/config.py` — no defaults, so an unconfigured deployment fails closed rather
+  than silently skipping the send). There is no cost, price, or currency field
+  anywhere in this codebase's data model — a statement is outcome counts only, never
+  a dollar figure. Statements are relationship-level, not per-project, by locked
+  design decision (see `CLAUDE.md`'s Changelog, 2026-09-15) — there is no
+  client-facing per-project billing. Not part of the interactive demo path above;
+  requires real SMTP configuration to actually send anything.
+- **Doctrine submissions** (`src/doctrine/`, `POST /doctrine/submissions`) — Track B,
+  Step 1 only: accepts and persists a project doctrine submission (including Tier 2
+  CORENET X parallel-entry fields), signs its own evidence record, and returns `409`
+  on a duplicate `submission_id`. There is no grounding-check or review-workflow
+  logic yet ("Step 2," not built) — this is a records intake, not an approval
+  pipeline.
+- **`src/ifc_sg/`** — a zero-row container for the *shape* of a CORENET X submission
+  element and its expected `SGPset_` property-set field names. Not a parser, not a
+  validator — no real IFC file is ever read by this codebase today. The
+  `<gateway-readiness>` frontend component (`frontend/gateway-readiness/`) is a UX
+  prototype built against this shape, explicitly labelled "EXAMPLE DATA" throughout
+  its demo — it has no backend route and performs no real check.
+- **`src/intake/`** — a skeleton adapter for an external ePTW claim source, plus an
+  identity-crosswalk container. The `authority_level` crosswalk this would need is
+  blocked pending a real external vendor's role vocabulary — see `CLAUDE.md`'s
+  2026-08-09 changelog entry. Not wired into the live `/airlock/claims` path.
 
 ## Seeing a GO and a NO_GO
 
@@ -282,6 +339,9 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 
 ## Status
 
-54/54 tests passing on `master`. Known open item (see `CLAUDE.md`'s `## Open Items`
-for full detail): whether ordinary `/airlock/claims` adjudications, not just
-overrides, should also push a Maestro alert.
+317/317 tests passing on `master` (verified 2026-09-16, HEAD
+`53c7b376a1dced228f90a68cd242a4651682d44c`; the 54/54 figure this section previously
+stated was current as of 2026-07-28 and had not been kept up since). See
+`CLAUDE.md`'s `## Open Items` for the current, full list of known gaps and pending
+proposals — the module list above ("Other real modules not shown on either screen")
+covers what's built; Open Items covers what's deliberately still undecided.
