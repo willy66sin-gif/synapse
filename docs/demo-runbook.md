@@ -27,20 +27,73 @@ Docker Desktop state can still differ from mine.
    to BCA**, ideally with internet the first time (the first run downloads two
    container images — after that, no internet is required at all).
 2. Confirm nothing else on your laptop is already using ports **8000**, **5432**,
-   or **6379** — if `docker compose up` fails with a message containing "port is
-   already allocated," something else is using one of those. Close it and retry.
-3. **If Docker Desktop restarted, your laptop slept and Docker recovered, or you
-   ran `docker compose down` (deliberately or to "clean up" after being unsure
-   the stack was still running) since your last rehearsal — you MUST re-run
-   Part 2 (seeding) again, every single time.** A clean `Ctrl+C` shutdown
-   followed by `docker compose up -d` does **not** require reseeding — see
-   "What I found while verifying" at the bottom for exactly which restart paths
-   do and don't, and why. When in doubt, reseeding is always safe (it no-ops on
-   anything already present) — budget an extra minute for it if unsure.
+   or **6379** — if the script (or `docker compose up`) fails with a message
+   containing "port is already allocated," something else is using one of
+   those. Close it and retry.
+3. You do not need to think about reseeding any more — the script always
+   reseeds, every time, and that's always safe (it no-ops on anything already
+   present). This used to be a manual step you had to remember; it no longer
+   is. (The reasoning is still recorded in "What I found while verifying," at
+   the bottom, if you're curious why this was ever tricky.)
 
 ---
 
-## Part 1 — Cold start (what you'll do the morning of)
+## Part 1 — One script (recommended: this is what you'll actually do on 30 Sep)
+
+**How this was verified:** on 2026-09-18 I actually ran `scripts\start-demo.bat`
+end to end, for real, twice — once from a genuinely cold state (`docker compose
+down -v`, nothing running), once again with the stack already up and seeded
+from the first run — and confirmed both times that the GO claim, the NO_GO
+claim (with `R-PTW-01`), and all three browser tabs came back correct, and that
+the automated suite is still 317/317 (this script doesn't touch application
+code, only adds these two new files).
+
+This single script does everything Parts 1–4 below do by hand: starts the
+system, waits for it to actually be ready (not a fixed timer), loads the demo
+data, submits both demo claims, and opens all three browser tabs. One
+double-click, one window, nothing else to remember.
+
+**What to do:**
+
+1. Open File Explorer and go to `C:\Users\USER\dev\synapse\scripts`.
+2. Double-click **`start-demo.bat`**.
+3. A window opens and prints a few short status lines:
+
+   ```
+   Starting system...
+   System ready.
+   Demo data loaded.
+   Opening screens...
+
+   Ready. Everything succeeded - safe to start talking.
+   ```
+
+4. Once you see **"Ready. Everything succeeded - safe to start talking."**,
+   the three browser tabs (Frontline GO, Frontline NO_GO, Supervisor NO_GO)
+   are already open with the real results loaded — nothing left to refresh or
+   click. Leave that window open in the background; you don't need to look at
+   it again. You're set to start talking.
+
+**If something goes wrong instead:** the window will say **"PROBLEM: ..."**
+followed by a plain-language description of what happened and what to do
+(e.g. Docker Desktop isn't running). Follow that instruction, then
+double-click `start-demo.bat` again — it's always safe to re-run, cold or
+already running. If it still won't get past the same problem twice, fall back
+to doing it by hand: "Part 1 (fallback)" through Part 4 below walk through the
+identical steps one at a time so you can see exactly where it's stuck.
+
+The script is real: `scripts\start-demo.ps1` (source `scripts\start-demo.bat`
+double-clicks). It uses `docker compose up --build -d` internally so you never
+need a second terminal window at all.
+
+---
+
+## Part 1 (fallback) — Cold start by hand, one step at a time
+
+**Use this only if `start-demo.bat` (Part 1 above) fails twice in a row and you
+need to see exactly which step is stuck.** Everything below is the same
+sequence the script runs automatically — it's kept here, tested and working,
+as the documented manual fallback.
 
 **Open a terminal.** On Windows, click Start, type `PowerShell`, press Enter.
 
