@@ -288,5 +288,5 @@ async def test_period_start_is_the_last_billed_periods_end(monkeypatch):
 
     evidence = await billing_service.generate_and_send_if_due(session, settings, now=NOW)
 
-    assert datetime.fromisoformat(evidence["statement"]["period_start"]) == last_end
-    assert datetime.fromisoformat(evidence["statement"]["period_end"]) == NOW
+    assert datetime.fromisoformat(evidence["statement"]["period_start"].replace("Z", "+00:00")) == last_end
+    assert datetime.fromisoformat(evidence["statement"]["period_end"].replace("Z", "+00:00")) == NOW

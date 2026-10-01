@@ -78,7 +78,14 @@ async def generate_and_send_if_due(
 
     last_record = await fetch_last_billing_statement_record(session)
     last_period_end = (
-        datetime.fromisoformat(last_record["statement"]["period_end"]) if last_record is not None else None
+        # .replace("Z", "+00:00"): defensive against a Z-suffixed timestamp
+        # (Pydantic v2's JSON-mode datetime serialization emits "Z" for UTC,
+        # which fromisoformat() only parses natively on Python 3.11+) -- this
+        # keeps the parse version-independent rather than relying on the
+        # deployed Python's minor version.
+        datetime.fromisoformat(last_record["statement"]["period_end"].replace("Z", "+00:00"))
+        if last_record is not None
+        else None
     )
 
     if not is_period_due(last_period_end, now, settings.billing_statement_cadence_days):
