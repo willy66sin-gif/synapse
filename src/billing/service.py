@@ -105,11 +105,25 @@ async def generate_and_send_if_due(
     return evidence
 
 
-async def on_claim_finalized(session: AsyncSession, settings: Settings = default_settings) -> Optional[dict]:
-    """Event trigger: call immediately after a claim-outcome record finalizes."""
-    return await generate_and_send_if_due(session, settings)
+async def on_claim_finalized(
+    session: AsyncSession, settings: Settings = default_settings, now: Optional[datetime] = None
+) -> Optional[dict]:
+    """Event trigger: call immediately after a claim-outcome record finalizes.
+
+    now: optional override, forwarded to generate_and_send_if_due(). Real
+    call sites never pass this -- it exists so tests can pin "now" instead
+    of relying on real wall-clock time coinciding with fixture dates.
+    """
+    return await generate_and_send_if_due(session, settings, now=now)
 
 
-async def run_scheduled_check(session: AsyncSession, settings: Settings = default_settings) -> Optional[dict]:
-    """Scheduled trigger: call from src/billing/scheduler.py's cadence-driven poll loop."""
-    return await generate_and_send_if_due(session, settings)
+async def run_scheduled_check(
+    session: AsyncSession, settings: Settings = default_settings, now: Optional[datetime] = None
+) -> Optional[dict]:
+    """Scheduled trigger: call from src/billing/scheduler.py's cadence-driven poll loop.
+
+    now: optional override, forwarded to generate_and_send_if_due(). Real
+    call sites never pass this -- same testability rationale as
+    on_claim_finalized()'s own now parameter.
+    """
+    return await generate_and_send_if_due(session, settings, now=now)

@@ -159,13 +159,13 @@ async def test_event_triggered_send_success_persists_delivered_evidence(monkeypa
 
     monkeypatch.setattr(billing_service, "send_statement_email", _fake_send)
     records = [
-        _adjudication_record("CLM-1", "GO"),
-        _adjudication_record("CLM-2", "NO_GO", "R-PTW-01"),
+        _adjudication_record("CLM-1", "GO", evaluated_at=NOW - timedelta(hours=1)),
+        _adjudication_record("CLM-2", "NO_GO", "R-PTW-01", evaluated_at=NOW - timedelta(hours=1)),
     ]
     session = _FakeSession(adjudication_records=records, last_billing_record_row=None)
     settings = _settings()
 
-    evidence = await billing_service.on_claim_finalized(session, settings)
+    evidence = await billing_service.on_claim_finalized(session, settings, now=NOW)
 
     assert evidence is not None
     assert evidence["type"] == "BillingStatementRecord"
@@ -235,7 +235,7 @@ async def test_event_triggered_not_due_does_not_touch_email_sender_at_all(monkey
     session = _FakeSession(last_billing_record_row=_billing_row((NOW - timedelta(days=1)).isoformat()))
     settings = _settings()
 
-    result = await billing_service.on_claim_finalized(session, settings)
+    result = await billing_service.on_claim_finalized(session, settings, now=NOW)
 
     assert result is None
     assert calls == []
@@ -250,10 +250,12 @@ async def test_scheduled_trigger_uses_the_same_due_check_and_pipeline(monkeypatc
         return EmailDeliveryResult(delivered=True, detail="Sent.")
 
     monkeypatch.setattr(billing_service, "send_statement_email", _fake_send)
-    session = _FakeSession(adjudication_records=[_adjudication_record("CLM-1", "NO_GO", "R-ZONE-01")])
+    session = _FakeSession(
+        adjudication_records=[_adjudication_record("CLM-1", "NO_GO", "R-ZONE-01", evaluated_at=NOW - timedelta(hours=1))]
+    )
     settings = _settings()
 
-    evidence = await billing_service.run_scheduled_check(session, settings)
+    evidence = await billing_service.run_scheduled_check(session, settings, now=NOW)
 
     assert evidence["delivered"] is True
     assert evidence["statement"]["no_go_breakdown_by_reason_code"] == {"R-ZONE-01": 1}
@@ -264,7 +266,7 @@ async def test_scheduled_trigger_not_due_returns_none():
     session = _FakeSession(last_billing_record_row=_billing_row((NOW - timedelta(days=2)).isoformat()))
     settings = _settings()
 
-    result = await billing_service.run_scheduled_check(session, settings)
+    result = await billing_service.run_scheduled_check(session, settings, now=NOW)
 
     assert result is None
 
