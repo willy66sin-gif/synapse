@@ -43,6 +43,11 @@ follows the same "every fail-closed gate gets its own signed evidence
 record" discipline per that build's explicit instruction. See its own
 docstring below for staleness_days.
 
+emit_regulatory_instrument_evidence() (2026-10-11, Step 1) signs a
+distinct record type for a RegulatoryInstrument creation event
+(src/regulatory/), same non-gating, creation-event posture as
+emit_doctrine_submission_evidence() above.
+
 emit_billing_statement_evidence() (2026-09-01, Hamilton Labs
 statement-of-accounts) signs a fifth, distinct record type for a
 billing-statement send attempt — success or failure alike, per that
@@ -357,6 +362,39 @@ def emit_doctrine_submission_evidence(submission: dict, staleness_days: int) -> 
         "type": "DoctrineSubmissionReceiptRecord",
         "submission": submission,
         "staleness_days": staleness_days,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_regulatory_instrument_evidence(instrument: dict, staleness_days: int, days_until_effective: int) -> dict:
+    """
+    Signs a RegulatoryInstrument creation event as its own distinct
+    record type, via the same SHA-256/JSON-LD mechanism as the other
+    emit_*() functions in this module (Step 1, 2026-10-11) -- mirrors
+    emit_doctrine_submission_evidence()'s shape exactly.
+
+    instrument is the plain dict (RegulatoryInstrument.model_dump(mode="json"),
+    with receipt_timestamp overwritten to the server-set value), stored
+    whole under its own "instrument" key, so this module stays
+    decoupled from src/regulatory/.
+
+    staleness_days (receipt date minus publish_date) and
+    days_until_effective (effective_date minus receipt date; negative
+    when the instrument was already in effect on receipt) are computed
+    by the caller (src/regulatory/router.py) and surfaced only inside
+    this signed record, never as persisted columns.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "RegulatoryInstrumentReceiptRecord",
+        "instrument": instrument,
+        "staleness_days": staleness_days,
+        "days_until_effective": days_until_effective,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 

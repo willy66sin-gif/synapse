@@ -18,6 +18,7 @@ from src.evidence.emitter import (
     emit_evidence,
     emit_override_evidence,
     emit_profile_rejection_evidence,
+    emit_regulatory_instrument_evidence,
 )
 
 CLAIM_PAYLOAD = {"claim_id": "test-1", "issuer_id": "USR-SUP-01"}
@@ -353,6 +354,62 @@ def test_emit_evidence_authority_binding_id_is_included_in_the_signed_payload():
 
     tampered = dict(result)
     tampered["authority_binding_id"] = "BIND-101"
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]
+
+
+# --- Step 1 (2026-10-11): emit_regulatory_instrument_evidence() ---
+
+REGULATORY_INSTRUMENT = {
+    "instrument_id": "INST-0001",
+    "issuing_authority": "EXAMPLE-BOARD",
+    "reference_number": "EXAMPLE/REF/2026/001",
+    "publish_date": "2026-09-01",
+    "effective_date": "2026-10-01",
+    "grounding_category": "STATUTE",
+    "receipt_timestamp": "2026-09-06T00:00:00+00:00",
+}
+
+
+def test_emit_regulatory_instrument_evidence_signature_matches_recomputed_hash():
+    result = emit_regulatory_instrument_evidence(REGULATORY_INSTRUMENT, staleness_days=5, days_until_effective=25)
+
+    unsigned = {k: v for k, v in result.items() if k != "sha256_signature"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert result["sha256_signature"] == expected
+    assert len(result["sha256_signature"]) == 64
+
+
+def test_emit_regulatory_instrument_evidence_is_a_distinct_record_type():
+    result = emit_regulatory_instrument_evidence(REGULATORY_INSTRUMENT, staleness_days=5, days_until_effective=25)
+
+    assert result["type"] == "RegulatoryInstrumentReceiptRecord"
+    assert result["type"] not in (
+        "AdjudicationRecord",
+        "OverrideRecord",
+        "ProfileRejectionRecord",
+        "BillingStatementRecord",
+        "DoctrineSubmissionReceiptRecord",
+    )
+
+
+def test_emit_regulatory_instrument_evidence_carries_the_full_instrument_and_both_day_counts():
+    result = emit_regulatory_instrument_evidence(REGULATORY_INSTRUMENT, staleness_days=5, days_until_effective=-3)
+
+    assert result["instrument"] == REGULATORY_INSTRUMENT
+    assert result["staleness_days"] == 5
+    assert result["days_until_effective"] == -3
+
+
+def test_emit_regulatory_instrument_evidence_tampering_invalidates_signature():
+    result = emit_regulatory_instrument_evidence(REGULATORY_INSTRUMENT, staleness_days=5, days_until_effective=25)
+
+    tampered = dict(result)
+    tampered["instrument"] = {**REGULATORY_INSTRUMENT, "effective_date": "2027-01-01"}
 
     unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
     recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
