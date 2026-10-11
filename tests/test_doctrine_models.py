@@ -88,3 +88,18 @@ def test_doctrine_submission_receipt_audit_entry_has_the_expected_columns():
     column_names = {column.name for column in DoctrineSubmissionReceiptAuditEntry.__table__.columns}
 
     assert column_names == {"id", "submission_id", "corenet_x_gateway", "record"}
+
+
+def test_timestamp_columns_are_timezone_aware():
+    """
+    2026-10-11 fix: src/doctrine/router.py sets receipt_timestamp from
+    datetime.now(timezone.utc), an aware value, and the Postgres driver
+    rejects an aware datetime for a timezone-naive column -- so both
+    timestamp columns must be declared timezone-aware. SQLite (used by
+    the round-trip test above) accepts either and cannot catch a
+    regression here; this pins the column types directly instead.
+    """
+    columns = DoctrineSubmissionRecord.__table__.columns
+
+    assert columns["receipt_timestamp"].type.timezone is True
+    assert columns["submitted_at"].type.timezone is True

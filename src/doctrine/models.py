@@ -37,6 +37,23 @@ column here -- it is computed at read/evidence time only, per that
 build's explicit "derived, not stored" instruction; see
 src/evidence/emitter.py's emit_doctrine_submission_evidence().
 
+Timezone-aware timestamp columns (2026-10-11, fix): receipt_timestamp
+and submitted_at are both DateTime(timezone=True). Before this, both
+were bare Mapped[datetime] -- a timezone-NAIVE column -- while
+src/doctrine/router.py has always set receipt_timestamp from
+datetime.now(timezone.utc), an AWARE value. The Postgres driver
+(asyncpg) refuses an aware datetime for a naive column ("can't
+subtract offset-naive and offset-aware datetimes"), so on a real
+database every POST /doctrine/submissions failed at the insert --
+nothing stored, no receipt evidence -- and the stub-session tests
+could not see it. Confirmed against Postgres 16 before fixing.
+submitted_at had the same fault for any client that sent an offset or
+"Z". Schema creation here never ALTERs an existing table (see
+src/core/init_db.py), so a database provisioned before this fix keeps
+the old column types until doctrine_submissions is altered or
+recreated; the table can only be empty there, since no insert ever
+succeeded.
+
 DoctrineSubmissionReceiptAuditEntry below is a distinct, second table:
 signed evidence of the creation event itself, not the submission record
 it evidences -- same "distinct evidence types live in distinct tables"
@@ -45,7 +62,7 @@ this file's own DoctrineSubmissionRecord.
 """
 from datetime import date, datetime
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, DateTime
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -61,12 +78,12 @@ class DoctrineSubmissionRecord(Base):
     jurisdiction_code: Mapped[str]
     citations: Mapped[list] = mapped_column(JSON)
     ambiguity_resolution_notes: Mapped[str]
-    submitted_at: Mapped[datetime]
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     signed_off: Mapped[bool]
     corenet_x_reference: Mapped[str]
     corenet_x_gateway: Mapped[CorenetXGateway] = mapped_column(SAEnum(CorenetXGateway))
     corenet_x_approval_date: Mapped[date]
-    receipt_timestamp: Mapped[datetime]
+    receipt_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     entered_by: Mapped[str]
 
 
