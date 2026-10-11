@@ -267,3 +267,64 @@ def test_profile_belonging_to_the_same_project_proceeds_normally():
     assert response.status_code == 200
     body = response.json()
     assert body["decision"] == "GO"
+
+
+# --- GLOBAL shared base codes (Step 2, 2026-10-11): never referenced directly by a claim ---
+
+GLOBAL_BASE_PROFILE = CertifiedProfileRecord(
+    profile_id="SHARED-BASE-CODE",
+    project_id="GLOBAL",
+    jurisdiction_code="SG",
+    version="2024.1",
+    lineage=ProfileLineage.STANDALONE,
+    base_profile_id=None,
+    base_profile_version=None,
+    parameters={},
+    accountable_architect="Jane Tan, ARB-1234",
+)
+
+
+def test_direct_reference_to_a_global_profile_is_rejected():
+    session = _StubSession(
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+        issuer_projects=["PROJ-A"],
+        profile_row=GLOBAL_BASE_PROFILE,
+    )
+    client = _client(session)
+
+    response = client.post(
+        "/airlock/claims", json=_claim(project_id="PROJ-A", profile_id="SHARED-BASE-CODE")
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["detail"]["reason_code"] == "R-PROJECT-01"
+    assert "GLOBAL" in body["detail"]["message"]
+
+    assert len(session.added) == 1
+    assert isinstance(session.added[0], ProjectScopeRejectionAuditEntry)
+
+
+def test_a_claim_declaring_project_global_cannot_match_a_global_profile():
+    """
+    The sentinel must not work as a matching project: even a claim
+    whose own project_id is "GLOBAL", from an issuer authorized for
+    "GLOBAL", is rejected when it names a GLOBAL profile directly.
+    """
+    session = _StubSession(
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+        issuer_projects=["GLOBAL"],
+        profile_row=GLOBAL_BASE_PROFILE,
+    )
+    client = _client(session)
+
+    response = client.post(
+        "/airlock/claims", json=_claim(project_id="GLOBAL", profile_id="SHARED-BASE-CODE")
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["reason_code"] == "R-PROJECT-01"
+    assert len(session.added) == 1
+    assert isinstance(session.added[0], ProjectScopeRejectionAuditEntry)

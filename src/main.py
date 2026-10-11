@@ -27,6 +27,9 @@ for the request/response conventions it follows.
 src/regulatory/router.py (2026-10-11): registry for standing
 regulatory instruments -- POST and GET /regulatory/instruments. A
 reference record only; see that router module's own doc comment.
+
+src/profiles/router.py (2026-10-11): POST /profiles, the first API
+write path for Certified Profiles (previously seed-script only).
 """
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from src.airlock.router import router as airlock_router
 from src.doctrine.router import router as doctrine_router
 from src.frontline.router import router as frontline_router
+from src.profiles.router import router as profiles_router
 from src.regulatory.router import router as regulatory_router
 from src.supervisor.router import router as supervisor_router
 from src.telemetry.router import router as telemetry_router
@@ -46,6 +50,7 @@ app.include_router(frontline_router)
 app.include_router(doctrine_router)
 app.include_router(telemetry_router)
 app.include_router(regulatory_router)
+app.include_router(profiles_router)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 

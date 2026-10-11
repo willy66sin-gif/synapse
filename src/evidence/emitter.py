@@ -48,6 +48,10 @@ distinct record type for a RegulatoryInstrument creation event
 (src/regulatory/), same non-gating, creation-event posture as
 emit_doctrine_submission_evidence() above.
 
+emit_certified_profile_evidence() (2026-10-11, Step 2) signs a
+distinct record type for a CertifiedProfile creation event
+(src/profiles/router.py's POST /profiles), same posture again.
+
 emit_billing_statement_evidence() (2026-09-01, Hamilton Labs
 statement-of-accounts) signs a fifth, distinct record type for a
 billing-statement send attempt — success or failure alike, per that
@@ -395,6 +399,32 @@ def emit_regulatory_instrument_evidence(instrument: dict, staleness_days: int, d
         "instrument": instrument,
         "staleness_days": staleness_days,
         "days_until_effective": days_until_effective,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+    record["sha256_signature"] = hashlib.sha256(serialized).hexdigest()
+
+    return record
+
+
+def emit_certified_profile_evidence(profile: dict) -> dict:
+    """
+    Signs a CertifiedProfile creation event as its own distinct record
+    type, via the same SHA-256/JSON-LD mechanism as the other emit_*()
+    functions in this module (Step 2, 2026-10-11).
+
+    profile is the plain dict (CertifiedProfile.model_dump(mode="json")),
+    stored whole under its own "profile" key, so this module stays
+    decoupled from src/profiles/ for this record the same way it is
+    for the others. A GLOBAL shared code is told apart from a
+    project's own profile by profile["project_id"] alone -- there is no
+    second flag for it.
+    """
+    record = {
+        "@context": "https://synapse.org/schemas/audit/v1",
+        "type": "CertifiedProfileReceiptRecord",
+        "profile": profile,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 

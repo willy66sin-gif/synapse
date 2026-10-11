@@ -10,7 +10,7 @@ validator exists to reject.
 import pytest
 from pydantic import ValidationError
 
-from src.profiles.schemas import BaseProfileRef, CertifiedProfile, ProfileLineage
+from src.profiles.schemas import GLOBAL_PROJECT_ID, BaseProfileRef, CertifiedProfile, ProfileLineage
 
 
 def test_standalone_profile_with_no_base_ref_is_valid():
@@ -100,5 +100,39 @@ def test_missing_project_id_is_rejected():
             version="2024",
             lineage=ProfileLineage.STANDALONE,
             parameters={"max_span_m": 12.0},
+            accountable_architect="Jane Tan, ARB-1234",
+        )
+
+
+def test_global_sentinel_is_an_ordinary_declared_project_id():
+    """
+    Step 2 (2026-10-11): a shared base code declares
+    GLOBAL_PROJECT_ID -- project_id stays required (see
+    test_missing_project_id_is_rejected above), it is not made
+    optional or nullable for this.
+    """
+    profile = CertifiedProfile(
+        profile_id="SHARED-BASE-CODE",
+        project_id=GLOBAL_PROJECT_ID,
+        jurisdiction_code="SG",
+        version="2024.1",
+        lineage=ProfileLineage.STANDALONE,
+        parameters={},
+        accountable_architect="Jane Tan, ARB-1234",
+    )
+
+    assert GLOBAL_PROJECT_ID == "GLOBAL"
+    assert profile.project_id == "GLOBAL"
+
+
+def test_null_project_id_is_rejected():
+    with pytest.raises(ValidationError):
+        CertifiedProfile(
+            profile_id="SHARED-BASE-CODE",
+            project_id=None,
+            jurisdiction_code="SG",
+            version="2024.1",
+            lineage=ProfileLineage.STANDALONE,
+            parameters={},
             accountable_architect="Jane Tan, ARB-1234",
         )

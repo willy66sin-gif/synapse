@@ -24,6 +24,19 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
+# Sentinel project_id for a non-project base/shared code (Step 2,
+# 2026-10-11, Willy-authorized). CertifiedProfile.project_id stays
+# required with no default and no nullability change -- a shared code
+# that belongs to no single client/project declares this value instead
+# of a real one. A GLOBAL profile is reachable only as a base, through
+# another profile's base_ref: src/airlock/project_check.py rejects a
+# claim that names one directly, whatever project the claim declares.
+# The value is reserved by convention only -- nothing stops a real
+# project from being named "GLOBAL" elsewhere in this codebase
+# (IssuerProject, zone keys, telemetry); that is not enforced here.
+GLOBAL_PROJECT_ID = "GLOBAL"
+
+
 class ProfileLineage(str, Enum):
     STANDALONE = "STANDALONE"
     BASE_ANNEX = "BASE_ANNEX"
@@ -82,6 +95,9 @@ class CertifiedProfile(BaseModel):
     # src/airlock/project_check.py compares a claim's project_id against
     # this field (when the claim names a profile_id) to detect a
     # cross-project reference.
+    # GLOBAL_PROJECT_ID (above) is the one non-project value this field
+    # takes, for a shared base code -- still a declared value, never an
+    # omitted one.
     project_id: str
     jurisdiction_code: str
     version: str

@@ -1,6 +1,12 @@
 """
 Certified profile registry model.
 
+Write path (Step 2, 2026-10-11): src/profiles/router.py's
+POST /profiles is the first API write path into this table -- before
+it, the only thing that ever created a row was
+scripts/seed_dev_data.py. The "ships with zero rows" statement below
+still holds at seed time; rows now arrive at request time.
+
 Container only: this table intentionally ships with zero rows, same
 discipline as src/telemetry/models.py's DeviceRegistryEntry and
 src/intake/models.py's IdentityCrosswalkEntry. No real jurisdiction,
@@ -55,3 +61,27 @@ class CertifiedProfileRecord(Base):
     base_profile_version: Mapped[Optional[str]]
     parameters: Mapped[dict] = mapped_column(JSON)
     accountable_architect: Mapped[str]
+
+
+class CertifiedProfileReceiptAuditEntry(Base):
+    """
+    One row per successful CertifiedProfile creation (Step 2,
+    2026-10-11) -- the signed evidence record src/profiles/router.py
+    emits on every POST /profiles. Append-only, same discipline as
+    every other audit table here, and a distinct table from
+    certified_profiles itself, same "distinct evidence types live in
+    distinct tables" convention as src/doctrine/models.py's
+    DoctrineSubmissionReceiptAuditEntry.
+
+    project_id is pulled out as its own column (the discriminator a
+    reader most likely filters on -- including finding every GLOBAL
+    profile ever created); the full profile stays inside `record`'s
+    JSON.
+    """
+
+    __tablename__ = "certified_profile_receipt_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    profile_id: Mapped[str] = mapped_column(index=True)
+    project_id: Mapped[str]
+    record: Mapped[dict] = mapped_column(JSON)

@@ -20,8 +20,44 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.profiles.models import CertifiedProfileRecord
+from src.profiles.models import CertifiedProfileReceiptAuditEntry, CertifiedProfileRecord
 from src.profiles.schemas import BaseProfileRef, CertifiedProfile
+
+
+async def persist_certified_profile(session: AsyncSession, profile: CertifiedProfile) -> None:
+    """
+    Inserts one row into the certified_profiles registry table (Step 2,
+    2026-10-11). Takes the validated CertifiedProfile itself -- the
+    inverse of fetch_certified_profile() below, flattening base_ref
+    into the base_profile_id/base_profile_version column pair that
+    function reassembles it from.
+    """
+    session.add(
+        CertifiedProfileRecord(
+            profile_id=profile.profile_id,
+            project_id=profile.project_id,
+            jurisdiction_code=profile.jurisdiction_code,
+            version=profile.version,
+            lineage=profile.lineage,
+            base_profile_id=profile.base_ref.base_profile_id if profile.base_ref is not None else None,
+            base_profile_version=profile.base_ref.base_profile_version if profile.base_ref is not None else None,
+            parameters=profile.parameters,
+            accountable_architect=profile.accountable_architect,
+        )
+    )
+    await session.commit()
+
+
+async def persist_certified_profile_receipt(session: AsyncSession, evidence: dict) -> None:
+    """Appends a signed CertifiedProfileReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
+    session.add(
+        CertifiedProfileReceiptAuditEntry(
+            profile_id=evidence["profile"]["profile_id"],
+            project_id=evidence["profile"]["project_id"],
+            record=evidence,
+        )
+    )
+    await session.commit()
 
 
 async def fetch_certified_profile(session: AsyncSession, profile_id: str) -> Optional[CertifiedProfile]:

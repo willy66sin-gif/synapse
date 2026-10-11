@@ -14,6 +14,7 @@ import json
 from src.core.evaluator import Verdict
 from src.evidence.emitter import (
     emit_billing_statement_evidence,
+    emit_certified_profile_evidence,
     emit_doctrine_submission_evidence,
     emit_evidence,
     emit_override_evidence,
@@ -410,6 +411,48 @@ def test_emit_regulatory_instrument_evidence_tampering_invalidates_signature():
 
     tampered = dict(result)
     tampered["instrument"] = {**REGULATORY_INSTRUMENT, "effective_date": "2027-01-01"}
+
+    unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
+    recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert recomputed != tampered["sha256_signature"]
+
+
+# --- Step 2 (2026-10-11): emit_certified_profile_evidence() ---
+
+CERTIFIED_PROFILE = {
+    "profile_id": "SHARED-BASE-CODE",
+    "project_id": "GLOBAL",
+    "jurisdiction_code": "SG",
+    "version": "2024.1",
+    "lineage": "STANDALONE",
+    "base_ref": None,
+    "parameters": {"example_parameter": 1},
+    "accountable_architect": "Jane Tan, ARB-1234",
+}
+
+
+def test_emit_certified_profile_evidence_signature_matches_recomputed_hash():
+    result = emit_certified_profile_evidence(CERTIFIED_PROFILE)
+
+    unsigned = {k: v for k, v in result.items() if k != "sha256_signature"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert result["sha256_signature"] == expected
+
+
+def test_emit_certified_profile_evidence_is_a_distinct_record_type_carrying_the_full_profile():
+    result = emit_certified_profile_evidence(CERTIFIED_PROFILE)
+
+    assert result["type"] == "CertifiedProfileReceiptRecord"
+    assert result["profile"] == CERTIFIED_PROFILE
+
+
+def test_emit_certified_profile_evidence_tampering_invalidates_signature():
+    result = emit_certified_profile_evidence(CERTIFIED_PROFILE)
+
+    tampered = dict(result)
+    tampered["profile"] = {**CERTIFIED_PROFILE, "project_id": "PROJ-A"}
 
     unsigned = {k: v for k, v in tampered.items() if k != "sha256_signature"}
     recomputed = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode("utf-8")).hexdigest()

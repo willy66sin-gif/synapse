@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.core.rules import IssuerRecord
-from src.profiles.schemas import CertifiedProfile
+from src.profiles.schemas import GLOBAL_PROJECT_ID, CertifiedProfile
 
 REASON_CODE_PROJECT_SCOPE_VIOLATION = "R-PROJECT-01"
 
@@ -78,8 +78,10 @@ def check_project_scope(
     """
     Returns the project_scope_check rule_trace entry for a claim that is
     going to proceed to adjudicate() regardless. Raises
-    ProjectScopeViolationError instead -- never returning -- for the two
-    cases where a genuine cross-project reference is detected;
+    ProjectScopeViolationError instead -- never returning -- for the
+    cases where a genuine cross-project reference is detected (a
+    profile or issuer from another project, or a direct reference to a
+    GLOBAL shared base code);
     src/airlock/router.py handles that exception entirely before
     adjudicate() is ever called, so a rejected claim never reaches this
     return path, mirroring check_profile_requirement()'s own contract.
@@ -93,6 +95,17 @@ def check_project_scope(
     this module's) -- see this module's own docstring for why that case
     is deliberately passed through here without raising.
     """
+    # GLOBAL shared codes (Step 2, 2026-10-11): reachable only as a
+    # base, through another profile's base_ref -- never named directly
+    # by a claim. Checked before the plain mismatch below, and without
+    # reference to claim_project_id, so a claim that itself declares
+    # project "GLOBAL" cannot slip a GLOBAL profile through as a match.
+    if profile is not None and profile.project_id == GLOBAL_PROJECT_ID:
+        raise ProjectScopeViolationError(
+            f"profile '{profile.profile_id}' is a shared '{GLOBAL_PROJECT_ID}' base code and cannot be "
+            f"referenced directly by a claim; reference a project profile that annexes it."
+        )
+
     if profile is not None and profile.project_id != claim_project_id:
         raise ProjectScopeViolationError(
             f"profile '{profile.profile_id}' belongs to project '{profile.project_id}', "
