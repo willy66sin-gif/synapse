@@ -79,7 +79,7 @@ from src.core.repository import (
 )
 from src.evidence.emitter import emit_evidence
 from src.evidence.repository import fetch_latest_adjudication_record, persist_adjudication_record
-from src.frontline.router import _verdict_transitioned
+from src.frontline.router import _verdict_transitioned, first_adjudicated_at
 from src.maestro.directory import resolve_authority
 from src.profiles.repository import fetch_certified_profile
 from src.supervisor.schemas import OverrideRecord
@@ -218,7 +218,16 @@ async def blocked_screen_status(
     if claim.profile_id is not None:
         certified_profile = await fetch_certified_profile(session, claim.profile_id)
 
-    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, certified_profile)
+    # as_of: the claim's first-adjudication time, not poll time -- see
+    # src/frontline/router.py's first_adjudicated_at().
+    verdict = adjudicate(
+        claim,
+        issuer_record,
+        zone_record,
+        issuer_roles,
+        certified_profile,
+        as_of=await first_adjudicated_at(session, claim_id),
+    )
 
     evaluated_at = evidence["evaluated_at"]
     if _verdict_transitioned(verdict, evidence):

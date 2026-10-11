@@ -50,7 +50,16 @@ VALID_FROM = (NOW - timedelta(hours=24)).isoformat()
 VALID_UNTIL = (NOW + timedelta(hours=24)).isoformat()
 
 ROUTER_TRACE = ["profile_check", "project_scope_check"]
-ALL_CORE_PASS = [("ptw_precondition_check", True), ("authority_check", True), ("zone_safety_check", True)]
+# lift_panel_oem_consent_check (Rule 3, 2026-10-11) runs on every claim
+# that clears Rules 0-2; none of this file's claims declare lift
+# control panel work, so it always passes here. Its own matrix lives in
+# tests/test_lift_panel_rule.py.
+ALL_CORE_PASS = [
+    ("ptw_precondition_check", True),
+    ("authority_check", True),
+    ("zone_safety_check", True),
+    ("lift_panel_oem_consent_check", True),
+]
 
 
 class _StubResult:

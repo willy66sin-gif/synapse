@@ -41,6 +41,29 @@ async def fetch_latest_adjudication_record(session: AsyncSession, claim_id: str)
     return row.record if row is not None else None
 
 
+async def fetch_earliest_adjudication_record(session: AsyncSession, claim_id: str) -> Optional[dict]:
+    """
+    Returns the FIRST persisted evidence dict for this claim_id, or
+    None if it was never adjudicated (2026-10-11, Step 3
+    non-retroactivity).
+
+    The polling routes use its evaluated_at as the claim's
+    first-adjudication time when they re-run adjudicate().
+    fetch_latest_adjudication_record() above cannot serve that purpose:
+    every poll-detected verdict transition appends a newer record, so
+    the latest record's evaluated_at moves forward over a claim's life,
+    while this one never does (the table is append-only).
+    """
+    result = await session.execute(
+        select(AdjudicationAuditEntry)
+        .where(AdjudicationAuditEntry.claim_id == claim_id)
+        .order_by(AdjudicationAuditEntry.id.asc())
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return row.record if row is not None else None
+
+
 async def fetch_adjudication_records_in_range(
     session: AsyncSession, period_start: datetime, period_end: datetime, project_id: Optional[str] = None
 ) -> list[dict]:

@@ -18,18 +18,27 @@ Rule 0 (verify_ptw_precondition, the ePTW gate) runs before Rule 1
 (authority) and Rule 2 (zone safety) — a claim for high-risk work with
 no valid permit is rejected before Core ever considers who submitted
 it or where.
+
+Rule 3 (check_lift_panel_oem_consent, Step 3, 2026-10-11) runs last,
+after Rule 2: placed at the end so every pre-existing failure still
+reports exactly as it did before for a claim that fails more than one
+way. Its rule_trace entry is the only one that carries a `grounding`
+key -- see src/core/rules.py's GroundedRuleOutcome.
 """
 from dataclasses import asdict
+from datetime import datetime
 from typing import Optional, TypedDict
 
 from src.airlock.schemas import ClaimPayload
 from src.core.roles import AuthorityRoleType
 from src.core.rules import (
+    REASON_CODE_LIFT_PANEL_OEM_CONSENT,
     REASON_CODE_PTW_PRECONDITION,
     REASON_CODE_ZONE_SAFETY_FAILURE,
     IssuerRecord,
     ZoneRecord,
     check_authority,
+    check_lift_panel_oem_consent,
     check_zone_safety,
     classify_authority_failure,
     verify_ptw_precondition,
@@ -51,10 +60,12 @@ def adjudicate(
     zone_record: Optional[ZoneRecord],
     issuer_roles: list[AuthorityRoleType],
     certified_profile: Optional[CertifiedProfile] = None,
+    as_of: Optional[datetime] = None,
 ) -> Verdict:
     """
     Evaluates a validated claim against Rule 0 (ePTW precondition),
-    then Rule 1 (authority), then Rule 2 (zone safety), short-
+    then Rule 1 (authority), then Rule 2 (zone safety), then Rule 3
+    (lift control panel OEM consent, 2026-10-11), short-
     circuiting NO_GO on the first failed rule — same control flow as
     synapse_mdm.py's `adjudicate`, extended with the ePTW gate ahead
     of it.
@@ -88,6 +99,23 @@ def adjudicate(
     already built and tested but still uncalled from any production
     path) is what would actually change adjudication behavior; this one
     does not.
+
+    as_of (2026-10-11, Step 3 non-retroactivity): the time this claim
+    was FIRST adjudicated, as an already-resolved, timezone-aware
+    value -- same "the caller resolves it, Core only receives it"
+    discipline as every parameter above, so this function still reads
+    no clock and does no I/O for it. src/airlock/router.py passes the
+    server's current time on a first submission; the two polling
+    routes (src/frontline/router.py, src/supervisor/router.py), which
+    re-run this function on a stored claim, pass that claim's earliest
+    persisted evaluated_at, so a later poll judges the claim against
+    the rules in force when it was first adjudicated, not the rules in
+    force at poll time. Only Rule 3 reads it. Optional and defaulted to
+    None so existing callers keep working, the same way
+    certified_profile is -- but None is not a quiet default to "now":
+    Rule 3 fails closed if it needs a time and was given none (see
+    check_lift_panel_oem_consent()). Rule 0's own permit-window check
+    is unchanged and still reads the wall clock itself.
     """
     rule_trace: list[dict] = []
 
@@ -128,6 +156,17 @@ def adjudicate(
             reason=zone_outcome.reason,
             rule_trace=rule_trace,
             reason_code=REASON_CODE_ZONE_SAFETY_FAILURE,
+        )
+
+    lift_panel_outcome = check_lift_panel_oem_consent(claim, as_of)
+    rule_trace.append(asdict(lift_panel_outcome))
+    if not lift_panel_outcome.passed:
+        return Verdict(
+            claim_id=claim.claim_id,
+            decision="NO_GO",
+            reason=lift_panel_outcome.reason,
+            rule_trace=rule_trace,
+            reason_code=REASON_CODE_LIFT_PANEL_OEM_CONSENT,
         )
 
     return Verdict(

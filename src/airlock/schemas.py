@@ -140,6 +140,24 @@ class ClaimPayload(BaseModel):
     # validated (see profile_check.py) -- early adopters aren't
     # penalized for sending it ahead of enforcement.
     profile_id: Optional[str] = None
+    # Lift control panel declaration (Step 3, 2026-10-11,
+    # Willy-authorized). Three additive flags, each defaulting to False
+    # so every existing claim payload stays valid unedited -- same
+    # approach as is_design_alteration above. Self-declared only, the
+    # same standing as that flag: nothing here detects that work is in
+    # a lift control panel, classifies a component as lift-related or
+    # not, or verifies that OEM consent was actually given.
+    # src/core/rules.py's check_lift_panel_oem_consent() (R-LIFT-01)
+    # reads all three: it fails a claim where the first two are True
+    # and the third is False. oem_consent_obtained is a precondition
+    # flag on the claim, not an authority role. It stands for both the
+    # OEM's technical assessment and its consent -- the two are not
+    # captured as separate fields. No cross-field validation is applied
+    # (e.g. oem_consent_obtained=True with no panel work is accepted,
+    # and simply has no effect).
+    lift_control_panel_work: bool = False
+    non_lift_component_installed: bool = False
+    oem_consent_obtained: bool = False
 
     @model_validator(mode="after")
     def _alteration_description_matches_flag(self) -> "ClaimPayload":

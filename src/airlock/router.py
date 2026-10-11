@@ -42,6 +42,7 @@ src/core/repository.py's fetch_zone_record()) rather than duplicated as
 a third branch here.
 """
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from redis.asyncio import Redis
@@ -164,7 +165,13 @@ async def submit_claim(
     # also see None (no profile_id submitted, or an unresolvable one
     # during the grace period) -- adjudicate() treats None exactly as
     # it did before Part B existed.
-    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, profile)
+    # Step 3 non-retroactivity (2026-10-11): this is the claim's first
+    # adjudication, so "as of" is the server's own clock, read here --
+    # never claim.timestamp, which is submitter-supplied and unverified.
+    # See adjudicate()'s docstring for what reads it.
+    verdict = adjudicate(
+        claim, issuer_record, zone_record, issuer_roles, profile, as_of=datetime.now(timezone.utc)
+    )
     # GO Freshness Phase 3a, Part A: appended here, not inside
     # adjudicate() -- see this function's own docstring above.
     verdict["rule_trace"].append(asdict(profile_outcome))

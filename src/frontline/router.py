@@ -30,6 +30,7 @@ from before adjudication.
 """
 import html
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -47,7 +48,11 @@ from src.core.repository import (
     get_redis_client,
 )
 from src.evidence.emitter import emit_evidence
-from src.evidence.repository import fetch_latest_adjudication_record, persist_adjudication_record
+from src.evidence.repository import (
+    fetch_earliest_adjudication_record,
+    fetch_latest_adjudication_record,
+    persist_adjudication_record,
+)
 from src.maestro.directory import resolve_authority
 from src.profiles.repository import fetch_certified_profile
 
@@ -93,6 +98,25 @@ async def frontline_status_screen(claim_id: str, session: AsyncSession = Depends
     }
 
     return HTMLResponse(_render_frontline_screen_page(frontline_screen_data))
+
+
+async def first_adjudicated_at(session: AsyncSession, claim_id: str) -> datetime:
+    """
+    The time a stored claim was first adjudicated: the earliest
+    persisted evidence record's server-set evaluated_at (2026-10-11,
+    Step 3 non-retroactivity). Passed to adjudicate() as as_of on every
+    re-evaluating poll, here and in src/supervisor/router.py, so a
+    claim keeps being judged against the requirements in force when it
+    was first adjudicated -- a requirement that takes effect later does
+    not reach back and flip it. Issuer, zone and profile state are
+    still re-fetched fresh on every poll, unchanged; only this one
+    reference time is fixed.
+
+    Only called once a record is known to exist (both callers 404
+    first), so the earliest record is never None here.
+    """
+    earliest = await fetch_earliest_adjudication_record(session, claim_id)
+    return datetime.fromisoformat(earliest["evaluated_at"])
 
 
 @router.get("/blocked/{claim_id}/status")
@@ -184,7 +208,14 @@ async def frontline_status_json(
     if claim.profile_id is not None:
         certified_profile = await fetch_certified_profile(session, claim.profile_id)
 
-    verdict = adjudicate(claim, issuer_record, zone_record, issuer_roles, certified_profile)
+    verdict = adjudicate(
+        claim,
+        issuer_record,
+        zone_record,
+        issuer_roles,
+        certified_profile,
+        as_of=await first_adjudicated_at(session, claim_id),
+    )
 
     if _verdict_transitioned(verdict, evidence):
         # Re-check immediately before writing -- see this function's own

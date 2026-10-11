@@ -23,7 +23,7 @@ parameter check_authority() already takes, not a resolution this
 function performs itself — it stays pure and does zero I/O.
 """
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from src.airlock.schemas import ClaimPayload, WorkType
@@ -147,6 +147,103 @@ REASON_CODE_AUTHORITY_FAILURE = "R-AUTH-01"
 REASON_CODE_AUTHORITY_FAILURE_HIGH_RISK = "R-AUTH-02"
 REASON_CODE_AUTHORITY_FAILURE_NOMINAL = "R-AUTH-03"
 REASON_CODE_ZONE_SAFETY_FAILURE = "R-ZONE-01"
+# R-LIFT-01 (Step 3, 2026-10-11): Rule 3, check_lift_panel_oem_consent(),
+# below. Deliberately has no GATE_ADMISSIBLE_ROLES row: OEM consent is
+# a precondition flag on the claim itself, not a role an issuer holds.
+REASON_CODE_LIFT_PANEL_OEM_CONSENT = "R-LIFT-01"
+
+
+@dataclass(frozen=True)
+class RuleGrounding:
+    """
+    The external doctrine source a rule cites (Step 3, 2026-10-11).
+    First of its kind here: no rule before check_lift_panel_oem_consent()
+    cited anything.
+
+    instrument_issuing_authority + instrument_reference_number are the
+    link to src/regulatory/'s registry -- the same pair that table
+    holds unique, findable with
+    GET /regulatory/instruments?issuing_authority=...&reference_number=...
+    The link is by value only. Core does no I/O, so a rule never looks
+    its instrument up, never checks the row exists, and never reads the
+    instrument's publish or effective date: a cited rule applies
+    whether or not anyone has registered the instrument yet.
+
+    Plain strings, not src/regulatory/ or src/doctrine/ types, so Core
+    takes no dependency on either package for this.
+
+    effective_date is the date the cited requirement takes effect, as
+    an ISO date string -- or EFFECTIVE_DATE_UNCONFIRMED (below) while
+    that date has not been confirmed. Held here, beside the rule, not
+    read from the registry: the rule is hard-coded, so its commencement
+    date is too. A string rather than a date so the whole grounding
+    serializes into the signed evidence record as-is.
+    """
+
+    instrument_issuing_authority: str
+    instrument_reference_number: str
+    provision: str
+    basis: str
+    effective_date: str
+
+
+@dataclass(frozen=True)
+class GroundedRuleOutcome(RuleOutcome):
+    """
+    A RuleOutcome that carries its RuleGrounding into rule_trace (and
+    so into the signed evidence record). A subclass rather than a new
+    field on RuleOutcome itself, so the three pre-existing rules'
+    rule_trace entries keep exactly the three keys they always had.
+
+    evaluated_as_of records the adjudication time the rule was judged
+    against (ISO string), or None if the caller supplied none -- so a
+    reader of the evidence can see which side of effective_date the
+    claim was placed on, and why.
+    """
+
+    grounding: RuleGrounding
+    evaluated_as_of: Optional[str]
+
+
+# Placeholder for a RuleGrounding.effective_date that has not been
+# confirmed. NOT a date, on purpose: it cannot be compared, cannot be
+# mistaken for a real commencement date, and cannot quietly put a claim
+# on either side of one. While a rule's effective_date is this value,
+# the rule cannot tell whether it applies to a claim, and fails closed
+# for any claim it would otherwise have to judge -- see
+# check_lift_panel_oem_consent().
+EFFECTIVE_DATE_UNCONFIRMED = "UNCONFIRMED"
+
+# Calendar-date boundary for effective_date: Singapore time (UTC+8, no
+# daylight saving, so a fixed offset is exact). A requirement taking
+# effect on a given date takes effect at 00:00 that day in Singapore,
+# not at 00:00 UTC eight hours later.
+EFFECTIVE_DATE_TIMEZONE = timezone(timedelta(hours=8))
+
+
+# Grounding for Rule 3. Recorded as EXTERNAL_SOURCE: the requirement
+# and its citation come from a primary document held by Willy -- the
+# BCA advisory letter Our Ref: BCA/EMEG/GEN/2026/018, dated 30 Sep
+# 2026, signed by the Group Director, EMEG -- supplied in conversation
+# (2026-10-11). Neither the letter nor the Regulation it cites is in
+# this repository, and nothing here verifies either; this constant
+# records what the rule rests on, it does not attest to it.
+#
+# effective_date is EFFECTIVE_DATE_UNCONFIRMED -- PROVISIONAL, TO BE
+# REPLACED. The date Regulation 38(1)(a) takes effect is being
+# confirmed with BCA and has deliberately NOT been inferred from the
+# letter's own date (30 Sep 2026): an issue date is not a commencement
+# date. Replace it with the confirmed ISO date (e.g. "2026-MM-DD")
+# once known; tests/test_lift_panel_rule.py's
+# test_effective_date_is_still_an_unconfirmed_placeholder fails when
+# that happens, so the change cannot land unnoticed.
+LIFT_PANEL_OEM_CONSENT_GROUNDING = RuleGrounding(
+    instrument_issuing_authority="BCA",
+    instrument_reference_number="BCA/EMEG/GEN/2026/018",
+    provision="Regulation 38(1)(a), Building Control (Fixed Installations) Regulations 2025",
+    basis="EXTERNAL_SOURCE",
+    effective_date=EFFECTIVE_DATE_UNCONFIRMED,
+)
 
 # Also used by verify_ptw_precondition, below -- moved up so both it and
 # classify_authority_failure() can reference the same, single frozenset.
@@ -423,4 +520,112 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
         rule_id="ptw_precondition_check",
         passed=True,
         reason=f"Permit '{ctx.ptw_id}' validated for '{claim.work_type.value}'.",
+    )
+
+
+def check_lift_panel_oem_consent(claim: ClaimPayload, as_of: Optional[datetime] = None) -> GroundedRuleOutcome:
+    """
+    Rule 3: Lift Control Panel OEM Consent Check (Step 3, 2026-10-11,
+    Willy-authorized). src/core/evaluator.py runs this last, after
+    Rule 2 (zone safety).
+
+    A non-lift-related component installed in a lift control panel
+    requires the OEM's technical assessment and consent. The claim
+    is in scope when it declares lift_control_panel_work and
+    non_lift_component_installed both True and oem_consent_obtained
+    False. Every other combination passes without reference to any
+    date: the requirement either does not apply (not panel work, or no
+    non-lift component) or is declared met.
+
+    Not retroactive. For an in-scope claim the requirement only binds
+    from its effective date, so the outcome depends on as_of -- the
+    time the claim was FIRST adjudicated, supplied by the caller from
+    server-side time only (see src/core/evaluator.py's adjudicate()).
+    as_of is deliberately not ClaimPayload.timestamp: that is an
+    untyped, submitter-supplied string nothing verifies, and judging
+    against it would let a claim be backdated past the rule. Nor is it
+    read from the clock here: a stored claim re-evaluated on a later
+    poll must be judged as of when it was first adjudicated, not as of
+    the poll.
+
+    For an in-scope claim, in order:
+      - effective date unconfirmed (EFFECTIVE_DATE_UNCONFIRMED): the
+        rule cannot tell whether it applies -- fails closed, and says
+        so. This is the current state; see
+        LIFT_PANEL_OEM_CONSENT_GROUNDING.
+      - no as_of supplied: likewise cannot tell -- fails closed.
+      - as_of before the effective date (Singapore calendar date):
+        passes, "not yet in force".
+      - as_of on or after it: fails, the requirement is not met.
+
+    A naive (timezone-less) as_of is a caller bug, not a claim outcome:
+    it raises rather than being guessed at.
+
+    Hard-coded, like Rules 0-2 -- not a data-driven rule, and not a
+    step toward the still-open multi-regulator ruleset item in
+    CLAUDE.md. Reads only the three self-declared claim flags (see
+    their comment on src/airlock/schemas.py's ClaimPayload): no
+    issuer_roles parameter and no GATE_ADMISSIBLE_ROLES row, because
+    OEM consent is a precondition on the claim, not a role. Keyed on
+    the flags alone, not on work_type or action_type.
+
+    Every outcome, pass or fail, carries LIFT_PANEL_OEM_CONSENT_GROUNDING
+    -- see RuleGrounding for what that link does and does not do.
+    """
+    if as_of is not None and as_of.tzinfo is None:
+        raise ValueError("as_of must be timezone-aware.")
+
+    grounding = LIFT_PANEL_OEM_CONSENT_GROUNDING
+    evaluated_as_of = as_of.isoformat() if as_of is not None else None
+
+    def _outcome(passed: bool, reason: str) -> GroundedRuleOutcome:
+        return GroundedRuleOutcome(
+            rule_id="lift_panel_oem_consent_check",
+            passed=passed,
+            reason=reason,
+            grounding=grounding,
+            evaluated_as_of=evaluated_as_of,
+        )
+
+    if not (claim.lift_control_panel_work and claim.non_lift_component_installed):
+        return _outcome(
+            True, "No OEM consent required: claim does not declare a non-lift component in a lift control panel."
+        )
+
+    if claim.oem_consent_obtained:
+        return _outcome(True, "OEM consent declared for non-lift component in lift control panel.")
+
+    citation = (
+        f"{grounding.provision}; {grounding.instrument_issuing_authority} ref "
+        f"{grounding.instrument_reference_number}"
+    )
+
+    if grounding.effective_date == EFFECTIVE_DATE_UNCONFIRMED:
+        return _outcome(
+            False,
+            "FAIL_CLOSED_EFFECTIVE_DATE_UNCONFIRMED: Non-lift-related component in a lift control panel "
+            "without OEM technical assessment and consent, and the effective date of the requirement "
+            f"has not been confirmed, so whether it applies to this claim cannot be determined ({citation}).",
+        )
+
+    if as_of is None:
+        return _outcome(
+            False,
+            "FAIL_CLOSED_NO_ADJUDICATION_TIME: Non-lift-related component in a lift control panel "
+            "without OEM technical assessment and consent, and no adjudication time was supplied to "
+            f"judge it against the requirement's effective date {grounding.effective_date} ({citation}).",
+        )
+
+    effective_date = date.fromisoformat(grounding.effective_date)
+    if as_of.astimezone(EFFECTIVE_DATE_TIMEZONE).date() < effective_date:
+        return _outcome(
+            True,
+            f"Requirement not yet in force when this claim was first adjudicated: effective "
+            f"{grounding.effective_date}, adjudicated {evaluated_as_of} ({citation}).",
+        )
+
+    return _outcome(
+        False,
+        "Regulatory Requirement Not Met: Non-lift-related component in a lift control panel "
+        f"without OEM technical assessment and consent ({citation}; in force from {grounding.effective_date}).",
     )

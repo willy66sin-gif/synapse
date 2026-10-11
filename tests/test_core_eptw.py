@@ -255,7 +255,15 @@ def test_adjudicate_accepts_valid_high_risk_claim_end_to_end():
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
     rule_ids = [rule["rule_id"] for rule in verdict["rule_trace"]]
-    assert rule_ids == ["ptw_precondition_check", "authority_check", "zone_safety_check"]
+    # lift_panel_oem_consent_check (Rule 3, 2026-10-11) is evaluated on
+    # every claim that clears Rules 0-2, and passes here: this claim
+    # declares no lift control panel work.
+    assert rule_ids == [
+        "ptw_precondition_check",
+        "authority_check",
+        "zone_safety_check",
+        "lift_panel_oem_consent_check",
+    ]
 
 
 def test_adjudicate_nominal_civil_unaffected_by_eptw_gate():

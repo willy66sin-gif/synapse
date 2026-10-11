@@ -197,6 +197,7 @@ def test_excavation_go_path_rto_and_sa_issuer(maestro_calls):
         "ptw_precondition_check",
         "authority_check",
         "zone_safety_check",
+        "lift_panel_oem_consent_check",
         "profile_check",
         "project_scope_check",
     ]

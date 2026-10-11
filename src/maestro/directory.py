@@ -247,6 +247,31 @@ _CONTINUOUS_COMPLIANCE_AUTHORITY = AuthorityBinding(
     ActivationMode.CONTINUOUS,
 )
 
+# R-LIFT-01 -> RTO (Step 3, 2026-10-11, Willy-authorized). A failed
+# lift control panel OEM-consent check (src/core/rules.py's Rule 3) is
+# an ordinary execution-stage failure, so it escalates through RTO's
+# continuous on-site gate like R-PTW-01 and R-AUTH-01/02/03 -- NOT to
+# QP. An earlier draft of this step routed it to QP and was reverted
+# before commit: QP/QE's dormant-by-default rule (point 2 above,
+# 2026-08-18) exists precisely to keep them out of failures like this
+# one, and stays absolute -- no QP or QE binding is reachable through
+# any DIRECTORY_MAP key.
+#
+# Its own binding (BIND-RTO-LIFT-01) rather than a sixth key on
+# BIND-RTO-01, so an audit-trail reader can tell a lift-panel
+# escalation from the general compliance ones by binding_id alone.
+# Same role, same CONTINUOUS activation as BIND-RTO-01. discipline is
+# left None: Discipline (src/core/roles.py) has no M&E/lift member, and
+# none is guessed here.
+_LIFT_PANEL_COMPLIANCE_AUTHORITY = AuthorityBinding(
+    "BIND-RTO-LIFT-01",
+    role_type_label(AuthorityRoleType.RTO),
+    None,
+    AuthorityRoleType.RTO,
+    None,
+    ActivationMode.CONTINUOUS,
+)
+
 _DESIGN_ALTERATION_QP_AUTHORITY = AuthorityBinding(
     "BIND-QP-DA-01",
     role_type_label(AuthorityRoleType.QP),
@@ -327,6 +352,7 @@ DIRECTORY_MAP: dict[tuple[Optional[str], Optional[str]], AuthorityBinding] = {
     ("*", "R-AUTH-01"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "R-AUTH-02"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
     ("*", "R-AUTH-03"): _CONTINUOUS_COMPLIANCE_AUTHORITY,
+    ("*", "R-LIFT-01"): _LIFT_PANEL_COMPLIANCE_AUTHORITY,
 }
 
 

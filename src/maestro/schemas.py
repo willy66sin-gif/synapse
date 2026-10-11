@@ -34,6 +34,19 @@ class RuleConditionResult(BaseModel):
     rule_id: str
     passed: bool
     reason: str
+    # Step 3 (2026-10-11): present only on a rule_trace entry produced
+    # by a rule that cites an external doctrine source (src/core/rules.py's
+    # GroundedRuleOutcome -- today, only the lift control panel check).
+    # Optional and defaulted so every other entry validates unchanged;
+    # without it, extra="forbid" above would reject that one entry and
+    # fail the whole alert. Carried through as plain data, not
+    # rendered: src/maestro/formatting.py is unchanged, and the failing
+    # entry's `reason` text already names the provision and reference.
+    grounding: Optional[dict[str, str]] = None
+    # The adjudication time that same entry was judged against (see
+    # GroundedRuleOutcome.evaluated_as_of) -- carried, not rendered,
+    # for the same reason.
+    evaluated_as_of: Optional[str] = None
 
 
 class OutboundAlert(BaseModel):
