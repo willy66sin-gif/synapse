@@ -19,10 +19,20 @@ what's not yet decided" this module is scoped to avoid. `signed_off`
 below is the submitter's own attestation, not a review outcome --
 see this class's docstring.
 
-citations is a bare list of strings, not a structured citation model:
-no doctrine-standard category taxonomy exists yet for a citation to be
-validated against (that's the grounding check), so there is nothing
-for a structured shape to add over freeform text.
+Doctrine Grounding Standard, Step 0 (2026-10-11, Willy-authorized):
+citations is now a list of Citation entries -- each one a
+GroundingCategory tag plus the freeform reference text -- replacing the
+prior bare list of strings. This is a structural gate only: the schema
+boundary verifies every citation is tagged with one of the four
+categories and carries non-blank reference text, and that at least one
+citation is present. It does NOT verify the tag is the *correct* one
+for that reference, and does NOT re-verify the cited body's
+accreditation, the statute's existence, or anything else about the
+source itself -- that independent check is still the deferred
+"grounding check" described above, still not built. reference stays a
+plain str for the same reason the old bare-string list did: nothing in
+this repo holds a catalogue of real statutes/bodies/cases for it to be
+validated against.
 
 CORENET X Parallel Entry, Tier 2 (2026-09-02): adds a parallel,
 human-entered record of a project's CORENET X gateway approval
@@ -44,7 +54,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CorenetXGateway(str, Enum):
@@ -58,6 +68,59 @@ class CorenetXGateway(str, Enum):
     PILING = "PILING"
     CONSTRUCTION = "CONSTRUCTION"
     COMPLETION = "COMPLETION"
+
+
+class GroundingCategory(str, Enum):
+    """
+    The four Doctrine Grounding Standard categories a citation may be
+    tagged with (Step 0, 2026-10-11). Exactly the four values named in
+    that build's brief -- no fifth/OTHER value is guessed at here, so a
+    citation that fits none of them fails closed (422) rather than
+    being filed under a catch-all.
+
+    IHL is carried as given: the brief supplied the code only, not its
+    expansion, and none is invented here.
+
+    Defined in this module, not src/core/: Core has no knowledge of
+    doctrine grounding (same posture as the CORENET X fields below), so
+    unlike AuthorityRoleType (src/core/roles.py) there is no
+    Core-side consumer that would justify hosting it there.
+    src/regulatory/ reuses this same enum rather than declaring a
+    second copy.
+    """
+
+    STATUTE = "STATUTE"
+    ACCREDITED_BODY = "ACCREDITED_BODY"
+    PEER_REVIEWED_CASE_LAW = "PEER_REVIEWED_CASE_LAW"
+    IHL = "IHL"
+
+
+class Citation(BaseModel):
+    """
+    One tagged citation: which grounding category the submitter
+    declares it under, and the reference text itself.
+
+    Structural only -- see this module's docstring. `category` is the
+    submitter's own declaration, the same standing as `signed_off`
+    below: recorded as filed, not checked against anything.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: GroundingCategory
+    reference: str
+
+    @field_validator("reference")
+    @classmethod
+    def _reference_is_not_blank(cls, value: str) -> str:
+        """
+        Fail-closed at the schema boundary: a tagged citation with
+        empty or whitespace-only reference text is a tag attached to
+        nothing -- rejected with 422, not accepted as "present".
+        """
+        if not value.strip():
+            raise ValueError("citation reference must not be blank.")
+        return value
 
 
 class DoctrineSubmission(BaseModel):
@@ -76,7 +139,11 @@ class DoctrineSubmission(BaseModel):
     submission_id: str
     submitting_party_id: str
     jurisdiction_code: str
-    citations: list[str]
+    # min_length=1 (Step 0, 2026-10-11): "tagged and present" is read
+    # here as at least one citation per submission -- a submission
+    # citing nothing has no grounding to tag. Flagged back to Willy as
+    # an interpretation, not a separately-stated requirement.
+    citations: list[Citation] = Field(min_length=1)
     ambiguity_resolution_notes: str
     submitted_at: datetime
     signed_off: bool

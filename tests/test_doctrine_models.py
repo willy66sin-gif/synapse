@@ -64,7 +64,7 @@ def test_doctrine_submission_record_accepts_a_real_row():
                 submission_id="SUB-0001",
                 submitting_party_id="Acme Architects",
                 jurisdiction_code="SG",
-                citations=["SS EN 1992-1-1"],
+                citations=[{"category": "ACCREDITED_BODY", "reference": "SS EN 1992-1-1"}],
                 ambiguity_resolution_notes="n/a",
                 submitted_at=datetime(2026, 8, 12, 9, 30, 0),
                 signed_off=True,

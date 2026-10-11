@@ -278,7 +278,7 @@ DOCTRINE_SUBMISSION = {
     "submission_id": "SUB-0001",
     "submitting_party_id": "Acme Architects",
     "jurisdiction_code": "SG",
-    "citations": ["SS EN 1992-1-1"],
+    "citations": [{"category": "ACCREDITED_BODY", "reference": "SS EN 1992-1-1"}],
     "ambiguity_resolution_notes": "n/a",
     "submitted_at": "2026-08-12T09:30:00",
     "signed_off": True,

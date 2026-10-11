@@ -12,10 +12,14 @@ src/doctrine/router.py's POST /doctrine/submissions is the first real
 write path into this table -- it stays zero-row only until the first
 real submission is filed.
 
-citations stored as JSON (a plain list of strings), not a join table:
-mirrors src/profiles/models.py's parameters column -- there is no
-structured citation shape to normalize against yet (see
-src/doctrine/schemas.py's module docstring).
+citations stored as JSON, not a join table: mirrors
+src/profiles/models.py's parameters column. As of the Doctrine
+Grounding Standard Step 0 build (2026-10-11) each entry is a
+{"category", "reference"} object (src/doctrine/schemas.py's Citation)
+rather than a plain string -- the column type is unchanged (JSON
+either way), so no migration exists or is needed for the column
+itself; any row written before that build still holds the old
+plain-string list and is not rewritten here.
 
 Shares src/core/models.py's Base so src/core/init_db.py's single
 create_all() call provisions this table too, same pattern as

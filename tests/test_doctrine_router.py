@@ -21,7 +21,10 @@ VALID_SUBMISSION = {
     "submission_id": "SUB-0001",
     "submitting_party_id": "Acme Architects",
     "jurisdiction_code": "SG",
-    "citations": ["SS EN 1992-1-1", "SS 555:2016"],
+    "citations": [
+        {"category": "ACCREDITED_BODY", "reference": "SS EN 1992-1-1"},
+        {"category": "ACCREDITED_BODY", "reference": "SS 555:2016"},
+    ],
     "ambiguity_resolution_notes": "Local wind-load clause interpreted per SCDF guidance letter dated 2026-06-01.",
     "submitted_at": "2026-08-12T09:30:00",
     "signed_off": True,
@@ -206,3 +209,42 @@ def test_duplicate_submission_id_returns_409_not_500_and_persists_no_duplicate()
     committed_by_type = [obj.__class__.__name__ for obj in stub.committed]
     assert committed_by_type.count("DoctrineSubmissionRecord") == 1
     assert committed_by_type.count("DoctrineSubmissionReceiptAuditEntry") == 1
+
+
+def test_tagged_citations_are_persisted_and_signed_in_the_same_shape():
+    """
+    Doctrine Grounding Standard, Step 0 (2026-10-11): the category tag
+    travels with each citation into both the persisted row and the
+    signed evidence record, as its plain string value.
+    """
+    stub = _StubSession()
+
+    with _client_with_stub(stub) as client:
+        response = client.post("/doctrine/submissions", json=VALID_SUBMISSION)
+
+    assert response.status_code == 200
+    assert response.json()["submission"]["citations"] == VALID_SUBMISSION["citations"]
+    submission_row = stub.added[0]
+    assert submission_row.citations == VALID_SUBMISSION["citations"]
+
+
+@pytest.mark.parametrize(
+    "citations",
+    [
+        ["SS EN 1992-1-1"],
+        [{"reference": "SS EN 1992-1-1"}],
+        [{"category": "CIRCULAR", "reference": "SS EN 1992-1-1"}],
+        [{"category": "STATUTE", "reference": " "}],
+        [],
+    ],
+)
+def test_untagged_unknown_blank_or_absent_citations_422_and_persist_nothing(citations):
+    stub = _StubSession()
+    body = {**VALID_SUBMISSION, "citations": citations}
+
+    with _client_with_stub(stub) as client:
+        response = client.post("/doctrine/submissions", json=body)
+
+    assert response.status_code == 422
+    assert stub.added == []
+    assert stub.commit_count == 0

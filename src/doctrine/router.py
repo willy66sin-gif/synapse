@@ -61,8 +61,14 @@ async def submit_doctrine_submission(
     """
     receipt_timestamp = datetime.now(timezone.utc)
 
+    submission_json = submission.model_dump(mode="json")
+
     stored_fields = submission.model_dump()
     stored_fields["receipt_timestamp"] = receipt_timestamp
+    # citations go into a JSON column, so they are stored in their
+    # JSON-mode shape (category as its plain string value), the same
+    # shape the signed evidence record below carries.
+    stored_fields["citations"] = submission_json["citations"]
     try:
         await persist_doctrine_submission(session, stored_fields)
     except IntegrityError as exc:
@@ -72,7 +78,6 @@ async def submit_doctrine_submission(
             detail=f"A doctrine submission with submission_id '{submission.submission_id}' already exists.",
         ) from exc
 
-    submission_json = submission.model_dump(mode="json")
     submission_json["receipt_timestamp"] = receipt_timestamp.isoformat()
     staleness_days = (receipt_timestamp.date() - submission.corenet_x_approval_date).days
 
