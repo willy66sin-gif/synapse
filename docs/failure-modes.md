@@ -126,6 +126,46 @@ structural-rejection case in Part 1B.
   concept of "zone" validity at the schema level, only that `zone_id`/`action_type`
   are present and are strings.
 
+### R-LIFT-01 — Lift Control Panel OEM Consent (added 2026-10-11)
+
+*Added after this document's original pass; cited at commit
+`d8f76180c4a1c3076d9a0bc7810396dc3947e40b`, not the HEAD named in the header.*
+
+- **Trigger:** Rule 3, run last (after Rules 0–2 all pass). The claim declares
+  `lift_control_panel_work` and `non_lift_component_installed` both `true` and
+  `oem_consent_obtained` `false` — three self-declared flags, default `false`.
+  Three sub-conditions collapse to this one code:
+  (a) **the current state** — the requirement's effective date is the placeholder
+  `EFFECTIVE_DATE_UNCONFIRMED`, so whether it applies cannot be determined and the
+  claim fails closed; (b) a real effective date is set but the caller supplied no
+  adjudication time; (c) a real effective date is set and the claim was first
+  adjudicated on or after it (Singapore calendar date).
+  `[Repository-grounded]` `src/core/rules.py:526-631`; placeholder at
+  `src/core/rules.py:215,240-246`.
+- **Output shape:** HTTP 200, `reason_code: "R-LIFT-01"`, `reason` beginning
+  `FAIL_CLOSED_EFFECTIVE_DATE_UNCONFIRMED:` (a), `FAIL_CLOSED_NO_ADJUDICATION_TIME:`
+  (b), or `Regulatory Requirement Not Met:` (c). `rule_trace` has four Core entries;
+  the fourth alone carries `grounding` (issuing authority, reference number,
+  provision, basis `EXTERNAL_SOURCE`, effective date) and `evaluated_as_of`.
+  Routes to `["BIND-RTO-LIFT-01"]`.
+  `[Repository-grounded]` `src/core/evaluator.py:161-170`;
+  `src/maestro/directory.py:267,355`.
+- **Not a failure:** an in-scope claim first adjudicated *before* a set effective
+  date passes Rule 3 ("not yet in force"), and keeps passing on later polls —
+  both polling routes judge a stored claim as of its earliest persisted
+  `evaluated_at`, not as of the poll. Unreachable while the date is unconfirmed.
+  `[Repository-grounded]` `src/frontline/router.py:103-120`;
+  `src/evidence/repository.py:44`.
+- **Distinguishing from a structural rejection:** a non-boolean value for any of
+  the three flags is a plain 422 with no `reason_code`; omitting them is valid and
+  leaves the rule out of scope.
+- **Assurance gaps, stated plainly:** the three flags are self-declared and
+  unverified, the same standing as `is_design_alteration` (Part 2, item 3) — a
+  claim that simply does not raise the flags is never in scope. The cited letter
+  and Regulation are outside this repository and nothing here verifies them. The
+  rule does not check that the cited instrument is registered in
+  `regulatory_instruments` (it is not, today).
+
 ### R-DEV-01 — Device Not Registered (telemetry ingestion)
 
 - **Trigger:** `POST /telemetry/zone-state` names a `device_id` with no matching
@@ -214,10 +254,27 @@ defines one.
 
 **This is the practical test for "clean rejection vs. everything else":** if the
 response has no `reason_code` field and no `sha256_signature`, it's a structural
-rejection. If it has both, it's one of the ten classes above (eight NO_GO/trust/
+rejection. If it has both, it's one of the ten classes above, or `R-LIFT-01`
+(added 2026-10-11) (eight NO_GO/trust/
 profile reason codes, or the R-DEV-*/R-PROFILE-* off-Core paths) — a case where
 Synapse looked at real content and made a determination, not merely refused
 malformed input.
+
+**Routes added 2026-10-11 follow the same split.** `POST /doctrine/submissions`,
+`POST /regulatory/instruments` and `POST /profiles` reject a malformed body with a
+plain 422 and no evidence record — now including, for doctrine, an untagged
+citation, an unknown grounding category, a blank reference, or an empty
+`citations` list, and for regulatory instruments a client-supplied
+`receipt_timestamp`. Their non-structural rejections are also plain HTTP errors
+with a string `detail`, no `reason_code`, and no evidence record: 409 for a
+duplicate (`submission_id`; `instrument_id` or a repeated authority + reference;
+`profile_id`), 422 from `POST /profiles` when a `BASE_ANNEX` base is missing, at a
+different version, or in another project, and 404 from
+`GET /regulatory/instruments/{instrument_id}`. Only a *successful* creation on
+these three routes is signed. The one new signed rejection is on the claims path:
+a claim naming a `GLOBAL` profile directly is `R-PROJECT-01`.
+`[Repository-grounded]` `src/regulatory/router.py`; `src/profiles/router.py`;
+`src/airlock/project_check.py:103-108`.
 
 ---
 
@@ -262,6 +319,10 @@ not itself flag as uncertain? Every item below is cited to a specific file/line 
    entirely fabricated `timestamp` value adjudicates identically to one with an
    accurate one — the field is recorded into the signed `input_payload` for audit
    purposes, but plays no role in the GO/NO_GO decision itself.
+   *2026-10-11:* still true, and now relied on. `R-LIFT-01` is date-dependent and
+   deliberately does **not** read this field — it is judged against a
+   server-supplied first-adjudication time instead, precisely because this one can
+   be fabricated (`src/core/evaluator.py:103-118`).
 
 3. **`is_design_alteration` is self-declared with no verification logic.** The
    field's own doc comment states this plainly: "Self-declared only, per explicit

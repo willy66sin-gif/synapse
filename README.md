@@ -174,6 +174,12 @@ per `CLAUDE.md`'s own module-by-module changelog:
   defaults **off**; see "Optional: seeing `profile_id` enforcement," below, for the
   demo path. No rule in `src/core/rules.py` reads a profile's code parameters yet —
   resolution is wired, but nothing in adjudication consults it today.
+  `POST /profiles` (2026-10-11) creates one, with its own signed evidence record;
+  `409` on a duplicate `profile_id`, create-only (no update or versioning). A shared
+  base code that belongs to no single project declares `project_id: "GLOBAL"` — a
+  sentinel value, the field stays required. A `GLOBAL` profile can only be used as
+  a base (another profile's `base_ref`); a claim naming one directly is rejected
+  with `R-PROJECT-01`.
 - **Billing** (`src/billing/`) — generates a statement of adjudication outcome
   counts (GO/NO_GO tallies by reason code) on a configurable cadence or on a claim
   event, and emails it via SMTP if fully configured (`SMTP_HOST`/`SMTP_PORT`/etc. in
@@ -189,7 +195,36 @@ per `CLAUDE.md`'s own module-by-module changelog:
   CORENET X parallel-entry fields), signs its own evidence record, and returns `409`
   on a duplicate `submission_id`. There is no grounding-check or review-workflow
   logic yet ("Step 2," not built) — this is a records intake, not an approval
-  pipeline.
+  pipeline. Each entry in `citations` is a `{"category", "reference"}` object
+  (2026-10-11), `category` being one of `STATUTE`, `ACCREDITED_BODY`,
+  `PEER_REVIEWED_CASE_LAW`, `IHL`; a bare string, an unknown category, a blank
+  reference, or an empty list is a `422`. That is a structural tag only — nothing
+  checks the tag is right or the source is real. The submission's timestamp columns
+  are timezone-aware as of 2026-10-11; before that fix this endpoint could not
+  complete an insert on Postgres at all (see `CLAUDE.md`'s Changelog and Open Items
+  if your database volume predates it).
+- **Regulatory instruments** (`src/regulatory/`, 2026-10-11) — a registry for a
+  standing circular or advisory issued by a statutory board, independent of any
+  project (no `project_id`). `POST /regulatory/instruments` records one (issuing
+  authority, reference number, publish date, effective date, grounding category,
+  server-set receipt timestamp) and signs its own evidence record; `409` on a
+  duplicate id or a repeated authority + reference. `GET /regulatory/instruments`
+  lists them (optional exact `issuing_authority` / `reference_number` filters) and
+  `GET /regulatory/instruments/{instrument_id}` returns one. A reference record
+  only: adjudication never reads this table, and it ships empty.
+- **Lift control panel OEM-consent rule** (`R-LIFT-01`, Rule 3 in
+  `src/core/rules.py`, 2026-10-11) — a claim declaring `lift_control_panel_work`
+  and `non_lift_component_installed` without `oem_consent_obtained` is in scope
+  (three optional, self-declared claim flags, default `false`). The rule cites BCA
+  ref BCA/EMEG/GEN/2026/018 / Regulation 38(1)(a), Building Control (Fixed
+  Installations) Regulations 2025 in its `rule_trace` entry, and escalates to RTO
+  (`BIND-RTO-LIFT-01`). It is non-retroactive by construction — a claim is judged
+  as of when it was first adjudicated, server time, never the claim's own
+  `timestamp`. **The requirement's effective date is not yet confirmed**, and the
+  code holds a placeholder (`EFFECTIVE_DATE_UNCONFIRMED`) rather than a guess:
+  until a confirmed date is set, every in-scope claim is `NO_GO` with a
+  `FAIL_CLOSED_EFFECTIVE_DATE_UNCONFIRMED` reason. Claims that don't set the flags
+  are unaffected.
 - **`src/ifc_sg/`** — a zero-row container for the *shape* of a CORENET X submission
   element and its expected `SGPset_` property-set field names. Not a parser, not a
   validator — no real IFC file is ever read by this codebase today. The
@@ -339,9 +374,10 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 
 ## Status
 
-317/317 tests passing on `master` (verified 2026-09-16, HEAD
-`53c7b376a1dced228f90a68cd242a4651682d44c`; the 54/54 figure this section previously
-stated was current as of 2026-07-28 and had not been kept up since). See
+484/484 tests passing (verified 2026-10-11 at code commit
+`d8f76180c4a1c3076d9a0bc7810396dc3947e40b`; the 317/317 figure this section
+previously stated was verified 2026-09-16 at
+`53c7b376a1dced228f90a68cd242a4651682d44c`). See
 `CLAUDE.md`'s `## Open Items` for the current, full list of known gaps and pending
 proposals — the module list above ("Other real modules not shown on either screen")
 covers what's built; Open Items covers what's deliberately still undecided.
