@@ -13,7 +13,7 @@ Supervisor-facing verdict display enforcing CLAUDE.md's Locked Design Principles
 
 ### `telemetry_signed` — placeholder, not implemented trust
 
-`data.telemetrySigned` is a single optional boolean rendered as a badge (signed / unsigned / unknown). It does **not** correspond to any real backend field today — `src/core/rules.py`'s `ZoneRecord` has no such attribute, and there is no signing, attestation, HSM, or device-PKI mechanism anywhere in this codebase. It exists purely so the Blocked Screen has *somewhere* to show telemetry trust state once that work exists, without this component needing to change shape later. Treat any `true`/`false` value passed to it today as a caller-supplied placeholder, not a verified fact.
+`data.telemetrySigned` is a single optional boolean rendered as a badge (signed / unsigned / unknown). It does **not** correspond to any real backend field today — `src/core/rules.py`'s `ZoneRecord` has no such attribute, and this badge is not wired to any trust mechanism. The repository's only cryptographic signature check is Ed25519 verification of device telemetry payloads (`src/telemetry/trust.py`), which this badge does not read; evidence records are not signed (they carry a keyless SHA-256 hash), and there is no attestation, HSM, or device-PKI mechanism anywhere in this codebase. It exists purely so the Blocked Screen has *somewhere* to show telemetry trust state once that work exists, without this component needing to change shape later. Treat any `true`/`false` value passed to it today as a caller-supplied placeholder, not a verified fact.
 
 ### Open item this component surfaces
 

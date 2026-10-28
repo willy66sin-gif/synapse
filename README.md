@@ -1,7 +1,7 @@
 # Synapse
 
 A constitutional adjudication engine. It ingests a structured claim, deterministically
-adjudicates it against authority and zone-safety rules, and emits a signed, immutable
+adjudicates it against authority and zone-safety rules, and emits a hashed, append-only
 audit record — with a channel-agnostic delivery layer (Maestro) for pushing the result
 out to WhatsApp/Telegram/etc.
 
@@ -27,7 +27,7 @@ that.
 ```
 Airlock (ingestion, fail-closed schema validation)
   -> Core (pure, stateless adjudication: authority check, zone-safety check)
-    -> Evidence (SHA-256-signed, JSON-LD audit record)
+    -> Evidence (SHA-256-hashed, JSON-LD audit record)
 ```
 
 `Maestro` (`src/maestro/`) is a separate, fully decoupled delivery layer that can turn
@@ -66,7 +66,7 @@ docker compose up --build
 Builds and starts all three containers (`app`, `db`, `cache`). Verified 2026-07-28:
 clean startup logs for all three, `pg_isready`/`redis-cli ping` healthy in-container,
 all three ports (5432/6379/8000) reachable from the host, and a real
-`POST /airlock/claims` request against the live stack returns a genuine signed
+`POST /airlock/claims` request against the live stack returns a genuine hashed
 `GO`/`NO_GO` response — no mocks involved.
 
 Schema is provisioned automatically — `src/core/init_db.py` runs on every container
@@ -147,10 +147,10 @@ Two operator-facing screens sit on top of the pipeline above:
   condition, an escalation contact. Deliberately **NO_GO-only** — `409` on a GO claim,
   not a blank success screen.
 
-Both read the same signed evidence record; neither invents anything the other
+Both read the same hashed evidence record; neither invents anything the other
 doesn't already have. Both screens also expose a `GET .../status` polling endpoint
 (`/frontline/blocked/{claim_id}/status`, `/supervisor/blocked/{claim_id}/status`)
-that re-runs real adjudication fresh on every call and writes a signed transition
+that re-runs real adjudication fresh on every call and writes a hashed transition
 record if the verdict actually flips between polls (GO Freshness Phase 1/1b) — this
 is a genuine re-check, not a cached re-render of the original decision.
 
@@ -174,7 +174,7 @@ per `CLAUDE.md`'s own module-by-module changelog:
   defaults **off**; see "Optional: seeing `profile_id` enforcement," below, for the
   demo path. No rule in `src/core/rules.py` reads a profile's code parameters yet —
   resolution is wired, but nothing in adjudication consults it today.
-  `POST /profiles` (2026-10-11) creates one, with its own signed evidence record;
+  `POST /profiles` (2026-10-11) creates one, with its own hashed evidence record;
   `409` on a duplicate `profile_id`, create-only (no update or versioning). A shared
   base code that belongs to no single project declares `project_id: "GLOBAL"` — a
   sentinel value, the field stays required. A `GLOBAL` profile can only be used as
