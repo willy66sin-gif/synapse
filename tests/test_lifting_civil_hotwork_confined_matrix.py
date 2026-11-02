@@ -336,3 +336,31 @@ def test_excavation_with_lift_operation_label_in_high_hazard_zone_fails_r_zone_0
 
     evidence = _assert_no_go(response, sessions, maestro_calls, "R-ZONE-01", ZONE_FAIL_AFTER_0_AND_1)
     assert "Heavy lift requested in high-hazard zone 'ZONE-B3'" in evidence["reason"]
+
+
+# Zone hash present but with no hazard_level field: fetch_zone_record()
+# returns hazard_level=None for it (src/core/repository.py).
+ZONE_WITHOUT_HAZARD_LEVEL = {"active_crane": "true"}
+
+
+# 9
+def test_lifting_lift_operation_in_zone_with_no_hazard_level_fails_r_zone_01(maestro_calls):
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=ZONE_WITHOUT_HAZARD_LEVEL)
+
+    claim = _claim(WorkType.LIFTING, "LIFT_OPERATION", _ptw_context(WorkType.LIFTING))
+    response = client.post("/airlock/claims", json=claim)
+
+    evidence = _assert_no_go(response, sessions, maestro_calls, "R-ZONE-01", ZONE_FAIL_AFTER_0_AND_1)
+    assert "Hazard level for zone 'ZONE-B3' is missing or unrecognised (None)" in evidence["reason"]
+
+
+# 10
+def test_nominal_civil_non_lift_in_zone_with_no_hazard_level_is_go(maestro_calls):
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=ZONE_WITHOUT_HAZARD_LEVEL)
+
+    claim = _claim(WorkType.NOMINAL_CIVIL, "MATERIAL_ENTRY", None)
+    response = client.post("/airlock/claims", json=claim)
+
+    _assert_go(response, sessions, maestro_calls)

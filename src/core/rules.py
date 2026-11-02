@@ -71,6 +71,14 @@ class ZoneRecord:
     tagged_asset_present: bool = False
 
 
+# Recognised ZoneRecord.hazard_level values (2026-11-02, Willy-decided):
+# exactly these two, case-sensitive. ZoneRecord.hazard_level stays a
+# plain str -- src/core/repository.py's fetch_zone_record() returns None
+# for it when the Redis hash has no such field -- so membership is
+# checked in check_zone_safety(), below, for LIFT_OPERATION claims only.
+VALID_HAZARD_LEVELS = frozenset({"LOW", "HIGH"})
+
+
 # Sensor/human dual-input precedence (2026-08-27, telemetry-ingestion-
 # pathway build): a ZoneRecord field named here may be written either
 # by a human declaration (scripts/seed_dev_data.py, the only writer
@@ -397,6 +405,20 @@ def check_zone_safety(
             rule_id="zone_safety_check",
             passed=False,
             reason=f"Safety Violation: Zone '{claim.zone_id}' does not exist.",
+        )
+
+    # Fail closed (2026-11-02): a lift cannot be cleared against a zone
+    # whose hazard level is missing or not in VALID_HAZARD_LEVELS --
+    # otherwise anything but the exact string "HIGH" would pass the
+    # check below. Other action types are unchanged.
+    if claim.action_type == "LIFT_OPERATION" and zone_record.hazard_level not in VALID_HAZARD_LEVELS:
+        return RuleOutcome(
+            rule_id="zone_safety_check",
+            passed=False,
+            reason=(
+                f"Safety Violation: Hazard level for zone '{claim.zone_id}' is missing or unrecognised "
+                f"({zone_record.hazard_level!r}); lift operation cannot be cleared."
+            ),
         )
 
     if claim.action_type == "LIFT_OPERATION" and zone_record.hazard_level == "HIGH":
