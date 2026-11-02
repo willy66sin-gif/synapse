@@ -5,7 +5,7 @@ Willy-authorized).
 New: no prior endpoint existed for src/profiles/ -- the only thing
 that ever wrote a certified_profiles row was scripts/seed_dev_data.py.
 Mirrors src/doctrine/router.py's POST /doctrine/submissions shape
-(validate -> persist -> emit signed evidence -> persist evidence). It
+(validate -> persist -> emit hashed evidence -> persist evidence). It
 does not adjudicate anything.
 
 Create only. There is no update or delete route: profile_id is the

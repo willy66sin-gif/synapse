@@ -55,7 +55,7 @@ recreated; the table can only be empty there, since no insert ever
 succeeded.
 
 DoctrineSubmissionReceiptAuditEntry below is a distinct, second table:
-signed evidence of the creation event itself, not the submission record
+hashed evidence of the creation event itself, not the submission record
 it evidences -- same "distinct evidence types live in distinct tables"
 convention as src/billing/models.py's BillingStatementAuditEntry vs.
 this file's own DoctrineSubmissionRecord.
@@ -89,7 +89,7 @@ class DoctrineSubmissionRecord(Base):
 
 class DoctrineSubmissionReceiptAuditEntry(Base):
     """
-    One row per successful DoctrineSubmission creation -- the signed
+    One row per successful DoctrineSubmission creation -- the hashed
     evidence record src/doctrine/router.py emits on every POST
     /doctrine/submissions, per the Tier 2 CORENET X Parallel Entry
     build's "own signed evidence record on creation" requirement.

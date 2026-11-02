@@ -3,7 +3,11 @@ Rule definitions & state checkers.
 
 Zero-generation logic only. Every function here must be pure and
 deterministic: same input -> same output, no external calls, no
-probabilistic scoring, no LLM/NLP calls of any kind.
+probabilistic scoring, no LLM/NLP calls of any kind. One exception
+(2026-11-02): Rule 0 (verify_ptw_precondition) reads the wall clock
+to check the permit's valid_from/valid_until window, so the same claim
+can get a different outcome at a different time -- see
+src/core/evaluator.py's adjudicate() docstring, which says the same.
 
 Ported from synapse_mdm.py's `adjudicate` method (Rule 1: Authority
 Check, Rule 2: Physical Boundary & Zone Safety Check). The reference
@@ -177,7 +181,7 @@ class RuleGrounding:
     that date has not been confirmed. Held here, beside the rule, not
     read from the registry: the rule is hard-coded, so its commencement
     date is too. A string rather than a date so the whole grounding
-    serializes into the signed evidence record as-is.
+    serializes into the hashed evidence record as-is.
     """
 
     instrument_issuing_authority: str
@@ -191,7 +195,7 @@ class RuleGrounding:
 class GroundedRuleOutcome(RuleOutcome):
     """
     A RuleOutcome that carries its RuleGrounding into rule_trace (and
-    so into the signed evidence record). A subclass rather than a new
+    so into the hashed evidence record). A subclass rather than a new
     field on RuleOutcome itself, so the three pre-existing rules'
     rule_trace entries keep exactly the three keys they always had.
 

@@ -59,7 +59,7 @@ class SensorZoneStateAuditEntry(Base):
     Lives in src/telemetry/, not src/evidence/, mirroring how
     OverrideAuditEntry lives in src/supervisor/ rather than
     src/evidence/ — each domain owns its own audit table; src/evidence/
-    holds only the shared signing mechanism plus the original
+    holds only the shared hashing mechanism plus the original
     AdjudicationRecord table it was built for.
 
     Shares src/core/models.py's Base so src/core/init_db.py's single

@@ -6,7 +6,7 @@ New: no prior endpoint existed for src/doctrine/ -- this is the first
 write path into the previously zero-row doctrine_submissions registry
 (see src/doctrine/models.py's own docstring for why it shipped empty
 until now). Mirrors src/airlock/router.py's POST /airlock/claims shape
-(validate -> persist -> emit signed evidence -> persist evidence), but
+(validate -> persist -> emit hashed evidence -> persist evidence), but
 does not adjudicate anything and never touches src/core/'s evaluator --
 per this build's own non-goals, a DoctrineSubmission is a parallel
 record only.
@@ -20,7 +20,7 @@ duplicate that check, it only ever sees a validated submission whose
 receipt_timestamp is still None.
 
 staleness_days (receipt_timestamp minus corenet_x_approval_date) is
-computed here and threaded into the signed evidence record -- not
+computed here and threaded into the hashed evidence record -- not
 persisted as its own column anywhere, per this build's explicit
 "derived, not stored" instruction.
 
@@ -67,7 +67,7 @@ async def submit_doctrine_submission(
     stored_fields["receipt_timestamp"] = receipt_timestamp
     # citations go into a JSON column, so they are stored in their
     # JSON-mode shape (category as its plain string value), the same
-    # shape the signed evidence record below carries.
+    # shape the hashed evidence record below carries.
     stored_fields["citations"] = submission_json["citations"]
     try:
         await persist_doctrine_submission(session, stored_fields)

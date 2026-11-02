@@ -22,12 +22,12 @@ needs a timezone-aware column to round-trip without being rejected or
 silently stripped by the driver.
 
 Derived values (staleness, days until effective) are deliberately NOT
-columns -- computed at creation and carried only inside the signed
+columns -- computed at creation and carried only inside the hashed
 receipt record, same "derived, not stored" rule as
 src/doctrine/models.py's staleness.
 
 RegulatoryInstrumentReceiptAuditEntry is a distinct, second table:
-signed evidence of the creation event itself, same "distinct evidence
+hashed evidence of the creation event itself, same "distinct evidence
 types live in distinct tables" convention as
 DoctrineSubmissionReceiptAuditEntry.
 
@@ -59,7 +59,7 @@ class RegulatoryInstrumentRecord(Base):
 
 class RegulatoryInstrumentReceiptAuditEntry(Base):
     """
-    One row per successful RegulatoryInstrument creation -- the signed
+    One row per successful RegulatoryInstrument creation -- the hashed
     evidence record src/regulatory/router.py emits on every
     POST /regulatory/instruments. Append-only, same discipline as every
     other audit table here.

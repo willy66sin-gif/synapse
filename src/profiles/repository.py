@@ -49,7 +49,7 @@ async def persist_certified_profile(session: AsyncSession, profile: CertifiedPro
 
 
 async def persist_certified_profile_receipt(session: AsyncSession, evidence: dict) -> None:
-    """Appends a signed CertifiedProfileReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
+    """Appends a hashed CertifiedProfileReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
     session.add(
         CertifiedProfileReceiptAuditEntry(
             profile_id=evidence["profile"]["profile_id"],

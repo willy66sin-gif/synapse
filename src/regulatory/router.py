@@ -3,7 +3,7 @@ RegulatoryInstrument registry endpoints (Step 1, 2026-10-11).
 
 POST /regulatory/instruments mirrors src/doctrine/router.py's
 POST /doctrine/submissions shape exactly (validate -> persist -> emit
-signed evidence -> persist evidence). It does not adjudicate anything
+hashed evidence -> persist evidence). It does not adjudicate anything
 and never touches src/core/'s evaluator: a registered instrument is a
 reference record only.
 
@@ -13,7 +13,7 @@ src/regulatory/schemas.py's RegulatoryInstrument already rejects a
 non-null client-supplied value at the schema boundary (422) before
 this handler body runs.
 
-Two derived day-counts are computed here and threaded into the signed
+Two derived day-counts are computed here and threaded into the hashed
 evidence record, not persisted as columns -- same "derived, not
 stored" rule as src/doctrine/router.py's staleness_days:
   - staleness_days: receipt date minus publish_date (how long after

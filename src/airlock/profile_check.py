@@ -17,7 +17,7 @@ rejection (its only rejection today is FastAPI/Pydantic's automatic
 422 on ClaimPayload schema validation -- pure shape, no I/O, no reason
 code, no evidence emission). The closest real precedent anywhere in
 this codebase for "a fail-closed procedural rejection with its own
-reason code and its own signed evidence record, distinct from Core's
+reason code and its own hashed evidence record, distinct from Core's
 adjudication trail" is src/telemetry/trust.py's DeviceNotRegisteredError
 vs. TelemetrySignatureInvalidError split (R-DEV-01/R-DEV-02) --
 ported here as ProfileIdMissingError/ProfileIdUnresolvableError

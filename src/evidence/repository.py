@@ -1,11 +1,11 @@
 """
-Persistence for signed evidence records — the "immutable audit
+Persistence for hashed evidence records — the "immutable audit
 storage" half of CLAUDE.md's PostgreSQL role (the "rule registry"
 half is src/core/repository.py's AuthorizedIssuer lookups).
 
-Kept alongside src/evidence/emitter.py's pure signing logic, mirroring
+Kept alongside src/evidence/emitter.py's pure hashing logic, mirroring
 how src/core/repository.py is kept separate from src/core/rules.py's
-pure logic: signing stays pure and I/O-free, this module does the
+pure logic: hashing stays pure and I/O-free, this module does the
 actual database work.
 """
 from datetime import datetime
@@ -18,7 +18,7 @@ from src.evidence.models import AdjudicationAuditEntry
 
 
 async def persist_adjudication_record(session: AsyncSession, evidence: dict) -> None:
-    """Appends a signed AdjudicationRecord to the audit trail. Never updates or deletes existing rows."""
+    """Appends a hashed AdjudicationRecord to the audit trail. Never updates or deletes existing rows."""
     session.add(
         AdjudicationAuditEntry(
             claim_id=evidence["claim_id"],

@@ -8,7 +8,7 @@ own it does nothing — it never flips or mutates an existing
 adjudication result. Combined with src/supervisor/logic.py's
 evaluate_override() and src/evidence/emitter.py's
 emit_override_evidence(), it can only ever produce a new, additive,
-independently signed evidence entry alongside the original
+independently hashed evidence entry alongside the original
 AdjudicationRecord for the same claim_id.
 """
 from pydantic import BaseModel, ConfigDict, Field

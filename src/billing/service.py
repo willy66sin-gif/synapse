@@ -3,7 +3,7 @@ Statement-of-accounts orchestration: dual trigger wiring for the
 Hamilton Labs billing statement (2026-09-01).
 
 Two triggers, one shared "is a statement due" decision
-(is_period_due()) and one shared generate-sign-persist-send pipeline
+(is_period_due()) and one shared generate-hash-persist-send pipeline
 (generate_and_send_if_due()) -- avoids two independently-drifting
 copies of the same logic, per this pass's own requirements:
 
@@ -33,7 +33,7 @@ Both call sites share generate_and_send_if_due(), which:
      builds the statement (src/billing/statement.py's
      generate_statement(), pure), attempts delivery
      (src/billing/email_sender.py's send_statement_email()), and --
-     regardless of success or failure -- signs and persists a
+     regardless of success or failure -- hashes and persists a
      BillingStatementRecord for the attempt (this pass's own "every
      send... including failed-send attempts" instruction). A
      BillingConfigIncompleteError from send_statement_email() is

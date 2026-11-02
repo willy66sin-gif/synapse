@@ -32,7 +32,7 @@ TelemetrySignatureInvalidError, each carrying its own reason_code —
 see src/telemetry/trust.py), this function still makes no Redis write
 (2026-08-27, telemetry-rejection-evidence addendum: this was
 previously also true of evidence emission — it no longer is). A
-rejected attempt now gets its own signed, persisted
+rejected attempt now gets its own hashed, persisted
 SensorZoneStateRejectionRecord (src/evidence/emitter.py's
 emit_sensor_zone_rejection_evidence(), src/telemetry/models.py's
 SensorZoneStateRejectionAuditEntry) before the original exception

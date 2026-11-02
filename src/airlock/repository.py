@@ -13,7 +13,7 @@ from src.airlock.models import ProfileRejectionAuditEntry, ProjectScopeRejection
 
 async def persist_profile_rejection_record(session: AsyncSession, evidence: dict) -> None:
     """
-    Appends a signed ProfileRejectionRecord to its own audit trail --
+    Appends a hashed ProfileRejectionRecord to its own audit trail --
     never updates or deletes existing rows, same discipline as
     src/evidence/repository.py's persist_adjudication_record() and
     src/telemetry/repository.py's persist_sensor_zone_rejection_record().
@@ -31,7 +31,7 @@ async def persist_profile_rejection_record(session: AsyncSession, evidence: dict
 
 async def persist_project_scope_rejection_record(session: AsyncSession, evidence: dict) -> None:
     """
-    Appends a signed ProjectScopeRejectionRecord to its own audit trail --
+    Appends a hashed ProjectScopeRejectionRecord to its own audit trail --
     never updates or deletes existing rows, same discipline as
     persist_profile_rejection_record() above (project-scoping boundary,
     2026-09-15, Ring-Fencing Concept Note -- Willy-authorized

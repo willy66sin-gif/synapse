@@ -54,7 +54,7 @@ async def persist_regulatory_instrument(session: AsyncSession, instrument: dict)
 
 
 async def persist_regulatory_instrument_receipt(session: AsyncSession, evidence: dict) -> None:
-    """Appends a signed RegulatoryInstrumentReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
+    """Appends a hashed RegulatoryInstrumentReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
     session.add(
         RegulatoryInstrumentReceiptAuditEntry(
             instrument_id=evidence["instrument"]["instrument_id"],

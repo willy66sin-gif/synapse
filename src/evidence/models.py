@@ -6,7 +6,7 @@ audit storage"), which was declared from the start but never actually
 implemented until now — emit_evidence() stayed a pure, non-persisting
 function; this is the first thing that writes its output anywhere.
 
-Append-only, matching the emitter's own "immutable audit-trail
+Append-only, matching the emitter's own "append-only audit-trail
 logging" language: claim_id is NOT the primary key, so re-adjudicating
 the same claim_id (however that might happen) adds a new row rather
 than overwriting one. fetch_latest_adjudication_record() reads the

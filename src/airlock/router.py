@@ -21,8 +21,8 @@ so the response shape for /airlock/claims is unchanged either way.
 Escalation Ownership (2026-07-31): on NO_GO, authority is resolved via
 src/maestro/directory.py's resolve_authority(zone_id, reason_code)
 *before* emit_evidence() runs, so the resolved authority_binding_id
-can be part of the signed evidence record itself, not appended after
-signing. OutboundAlert.from_evidence_record() resolves authority again
+can be part of the hashed evidence record itself, not appended after
+hashing. OutboundAlert.from_evidence_record() resolves authority again
 internally for the alert's fields — a second call to the same pure,
 deterministic lookup, not a second decision; see its docstring.
 
@@ -110,7 +110,7 @@ async def submit_claim(
 
     Wires the full pipeline: profile_id check -> fetch issuer/zone
     state -> adjudicate (pure) -> resolve escalation authority (NO_GO
-    only) -> emit signed evidence record (carrying that resolved
+    only) -> emit hashed evidence record (carrying that resolved
     authority_binding_id) -> persist it, so a subsequent admin-override
     request has something real to check "does this claim exist"
     against -> on NO_GO only, notify Maestro.

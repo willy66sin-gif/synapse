@@ -41,7 +41,7 @@ structural-rejection case in Part 1B.
   `src/core/rules.py:128,160`.
 - **Output shape:** `POST /airlock/claims` still returns **HTTP 200** (this
   endpoint's own convention — NO_GO is a valid outcome, not an HTTP error). Body is
-  the signed `AdjudicationRecord`: `decision: "NO_GO"`, `reason_code: "R-PTW-01"`,
+  the hashed `AdjudicationRecord`: `decision: "NO_GO"`, `reason_code: "R-PTW-01"`,
   a human-readable `reason` string (one of five variants depending on which
   sub-condition failed — see `src/core/rules.py:339-403`), `rule_trace` containing
   exactly one entry (`ptw_precondition_check`, `passed: false`) since Rule 0
@@ -176,7 +176,7 @@ structural-rejection case in Part 1B.
   `/airlock/claims`, and its own convention treats a trust rejection as a request
   refusal at the boundary). Body: `{"reason_code": "R-DEV-01", "message": "<str>"}`.
   `[Repository-grounded]` `src/telemetry/router.py:86-89`. Also produces its own
-  distinct signed evidence record, `SensorZoneStateRejectionRecord`
+  distinct hashed evidence record, `SensorZoneStateRejectionRecord`
   (`source: "TELEMETRY_REJECTED"`, `attempted_value` recorded but not trusted),
   separate from the `AdjudicationRecord` trail entirely — this rejection never
   touches Core or a claim at all. `[Repository-grounded]`
@@ -248,7 +248,7 @@ type, unknown/extra field, unstructured prose, malformed JSON) is rejected with
 `src/airlock/router.py` runs at all. `[Repository-grounded]`
 `src/airlock/schemas.py:1-7,69,88`; `tests/test_airlock.py:123-149`. There is no
 `reason_code` field in this response at all (it's FastAPI's own generic
-validation-error body, not one of Synapse's signed evidence records), and no
+validation-error body, not one of Synapse's hashed evidence records), and no
 evidence record is emitted — the claim never became a "claim" as this system
 defines one.
 
@@ -271,7 +271,7 @@ duplicate (`submission_id`; `instrument_id` or a repeated authority + reference;
 `profile_id`), 422 from `POST /profiles` when a `BASE_ANNEX` base is missing, at a
 different version, or in another project, and 404 from
 `GET /regulatory/instruments/{instrument_id}`. Only a *successful* creation on
-these three routes is signed. The one new signed rejection is on the claims path:
+these three routes gets a hashed record. The one new hashed rejection is on the claims path:
 a claim naming a `GLOBAL` profile directly is `R-PROJECT-01`.
 `[Repository-grounded]` `src/regulatory/router.py`; `src/profiles/router.py`;
 `src/airlock/project_check.py:103-108`.
@@ -281,10 +281,10 @@ a claim naming a `GLOBAL` profile directly is `R-PROJECT-01`.
 ## Part 2 — Known assurance gaps: where a technically clean GO may not be fully warranted
 
 **This is the section that actually answers the reviewer's challenge.** Every NO_GO
-class above is, definitionally, visible — it comes with a `reason_code`, a signed
+class above is, definitionally, visible — it comes with a `reason_code`, a hashed
 record, and (for Core NO_GOs) a Maestro alert. The harder question is the inverse:
 under what already-repository-documented conditions does Synapse return a `GO` —
-decision `"GO"`, `reason_code: None`, HTTP 200, a signed evidence record indistinguishable
+decision `"GO"`, `reason_code: None`, HTTP 200, a hashed evidence record indistinguishable
 in shape from any other GO — that rests on an input or a wiring gap the system does
 not itself flag as uncertain? Every item below is cited to a specific file/line or
 `CLAUDE.md` entry; none is invented for this document.
@@ -317,7 +317,7 @@ not itself flag as uncertain? Every item below is cited to a specific file/line 
    search: no reference to `claim.timestamp` exists outside the schema
    declaration itself. **Concretely:** a claim submitted with a stale, future, or
    entirely fabricated `timestamp` value adjudicates identically to one with an
-   accurate one — the field is recorded into the signed `input_payload` for audit
+   accurate one — the field is recorded into the hashed `input_payload` for audit
    purposes, but plays no role in the GO/NO_GO decision itself.
    *2026-10-11:* still true, and now relied on. `R-LIFT-01` is date-dependent and
    deliberately does **not** read this field — it is judged against a
@@ -474,7 +474,7 @@ Python files across `airlock/`, `billing/`, `core/`, `doctrine/`, `evidence/`,
   non-personal fields in any `ClaimPayload`, `CertifiedProfile`, or evidence
   record.
 - **Retention rules.** No match for `retention`, `purge`, `TTL`/`time-to-live`,
-  or scheduled deletion/archival of records anywhere in `src/`. Every signed
+  or scheduled deletion/archival of records anywhere in `src/`. Every hashed
   evidence record (`AdjudicationRecord`, `SensorZoneStateRejectionRecord`,
   `ProfileRejectionRecord`, etc.) is written with no expiry, no purge job, and
   no retention-period field. The only tangential hit was `expire_on_commit=False`

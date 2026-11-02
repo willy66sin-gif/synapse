@@ -89,7 +89,7 @@ from src.telemetry.repository import fetch_device_public_key
 # src/telemetry/zone_write.py's write_sensor_zone_state() is the real
 # caller these are threaded to today: both fail closed with no Redis
 # write, and (2026-08-27, telemetry-rejection-evidence addendum) both
-# now also get their own signed SensorZoneStateRejectionRecord
+# now also get their own hashed SensorZoneStateRejectionRecord
 # carrying this reason_code, before the exception propagates.
 REASON_CODE_DEVICE_NOT_REGISTERED = "R-DEV-01"
 REASON_CODE_TELEMETRY_SIGNATURE_INVALID = "R-DEV-02"

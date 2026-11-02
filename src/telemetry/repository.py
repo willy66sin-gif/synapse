@@ -66,7 +66,7 @@ async def fetch_latest_sensor_zone_state_project_id(session: AsyncSession, devic
 
 async def persist_sensor_zone_state_record(session: AsyncSession, evidence: dict) -> None:
     """
-    Appends a signed SensorZoneStateRecord to its own audit trail.
+    Appends a hashed SensorZoneStateRecord to its own audit trail.
     Never updates or deletes existing rows — mirrors
     src/evidence/repository.py's persist_adjudication_record() and
     src/supervisor/repository.py's persist_override_record().
@@ -84,7 +84,7 @@ async def persist_sensor_zone_state_record(session: AsyncSession, evidence: dict
 
 async def persist_sensor_zone_rejection_record(session: AsyncSession, evidence: dict) -> None:
     """
-    Appends a signed SensorZoneStateRejectionRecord to its own audit
+    Appends a hashed SensorZoneStateRejectionRecord to its own audit
     trail — never updates or deletes existing rows, same discipline as
     persist_sensor_zone_state_record() above.
     """

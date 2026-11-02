@@ -66,7 +66,7 @@ class CertifiedProfileRecord(Base):
 class CertifiedProfileReceiptAuditEntry(Base):
     """
     One row per successful CertifiedProfile creation (Step 2,
-    2026-10-11) -- the signed evidence record src/profiles/router.py
+    2026-10-11) -- the hashed evidence record src/profiles/router.py
     emits on every POST /profiles. Append-only, same discipline as
     every other audit table here, and a distinct table from
     certified_profiles itself, same "distinct evidence types live in

@@ -35,7 +35,7 @@ detail body, since it isn't one of R-DEV-01/R-DEV-02 and inventing a
 third code for it is out of this build's scope.
 
 Response shape on success: write_sensor_zone_state()'s own returned
-evidence dict (a signed SensorZoneStateRecord), returned as-is — same
+evidence dict (a hashed SensorZoneStateRecord), returned as-is — same
 pattern as src/airlock/router.py's submit_claim() returning
 emit_evidence()'s record directly, no separate response envelope.
 

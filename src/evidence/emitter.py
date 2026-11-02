@@ -1,8 +1,9 @@
 """
-Immutable audit-trail logging.
+Append-only audit-trail logging.
 
-Every adjudication verdict gets emitted here as a signed, append-only
-record. Format per CLAUDE.md: JSON-LD payload, SHA-256 signature.
+Every adjudication verdict gets emitted here as a hashed, append-only
+record. Format per CLAUDE.md: JSON-LD payload, keyless SHA-256 hash (in the
+sha256_signature field -- a hash, not a digital signature).
 
 Ported from synapse_mdm.py's `emit_evidence` method: same @context /
 type / claim_id / evaluated_at / input_payload / sha256_signature
@@ -12,7 +13,7 @@ reason_code (R-DOMAIN-NN, e.g. "R-PTW-01" — see src/core/rules.py) is
 None for GO verdicts and for any future failure class that hasn't been
 given a code yet; it is not a substitute for `reason`, which stays the
 full human-readable message. Storage backend (Postgres write, file,
-etc.) is not wired up here — this function only produces the signed
+etc.) is not wired up here — this function only produces the hashed
 record; persisting it is a caller concern.
 
 authority_binding_id (2026-07-31, Escalation Ownership Principle;
@@ -25,17 +26,17 @@ src.maestro — Evidence stays decoupled from Maestro exactly as it
 already stays decoupled from src.supervisor, same "pass plain data,
 not types" pattern emit_override_evidence() already uses. The caller
 (src/airlock/router.py) resolves it before calling this function,
-since it must be part of the signed record, not appended after
-signing.
+since it must be part of the hashed record, not appended after
+hashing.
 
-emit_override_evidence() signs a distinct record type for admin
+emit_override_evidence() hashes a distinct record type for admin
 overrides (src/supervisor/), using the same mechanism. It is purely
 additive: it has no way to modify, replace, or remove an existing
 AdjudicationRecord — the two record types coexist in the audit trail,
 linked only by claim_id.
 
 emit_doctrine_submission_evidence() (2026-09-02, Tier 2 CORENET X
-Parallel Entry) signs a sixth, distinct record type for a
+Parallel Entry) hashes a sixth, distinct record type for a
 DoctrineSubmission creation event. Not a fail-closed gate — per that
 build's own non-goals, this record does not gate adjudication and
 src/core/ has no knowledge it exists — but creation-event evidencing
@@ -43,23 +44,23 @@ follows the same "every fail-closed gate gets its own signed evidence
 record" discipline per that build's explicit instruction. See its own
 docstring below for staleness_days.
 
-emit_regulatory_instrument_evidence() (2026-10-11, Step 1) signs a
+emit_regulatory_instrument_evidence() (2026-10-11, Step 1) hashes a
 distinct record type for a RegulatoryInstrument creation event
 (src/regulatory/), same non-gating, creation-event posture as
 emit_doctrine_submission_evidence() above.
 
-emit_certified_profile_evidence() (2026-10-11, Step 2) signs a
+emit_certified_profile_evidence() (2026-10-11, Step 2) hashes a
 distinct record type for a CertifiedProfile creation event
 (src/profiles/router.py's POST /profiles), same posture again.
 
 emit_billing_statement_evidence() (2026-09-01, Hamilton Labs
-statement-of-accounts) signs a fifth, distinct record type for a
+statement-of-accounts) hashes a fifth, distinct record type for a
 billing-statement send attempt — success or failure alike, per that
 build's "every send gets its own evidence record" requirement. See its
 own docstring below.
 
 emit_sensor_zone_state_evidence() (2026-08-27, telemetry-ingestion-
-pathway build) signs a third, distinct record type for a verified-
+pathway build) hashes a third, distinct record type for a verified-
 telemetry ZoneRecord write (src/telemetry/zone_write.py). Per that
 build's evidence-emission decision, this does not share
 AdjudicationRecord's or OverrideRecord's evidence trail — it is its
@@ -70,7 +71,7 @@ fields directly to Redis with no evidence emission of any kind, before
 and after this build alike).
 
 emit_sensor_zone_rejection_evidence() (2026-08-27, telemetry-
-rejection-evidence addendum) signs a fourth, distinct record type for
+rejection-evidence addendum) hashes a fourth, distinct record type for
 a *rejected* verified-telemetry write attempt (device unregistered or
 signature invalid) — no Redis write happened, so this is not a fourth
 variant of "a write occurred," it's an audit record of the rejection
@@ -124,7 +125,7 @@ def emit_sensor_zone_state_evidence(
     project_changed_from: Optional[str] = None,
 ) -> dict:
     """
-    Signs a verified-telemetry ZoneRecord field write as its own
+    Hashes a verified-telemetry ZoneRecord field write as its own
     distinct record type, via the same SHA-256/JSON-LD mechanism as
     emit_evidence()/emit_override_evidence(). Takes plain values, not
     a DeviceRegistryEntry/ZoneRecord type, so this module stays
@@ -183,7 +184,7 @@ def emit_sensor_zone_rejection_evidence(
     project_id: str, device_id: str, zone_id: str, field: str, attempted_value: bool, reason_code: str
 ) -> dict:
     """
-    Signs a rejected verified-telemetry write attempt as its own
+    Hashes a rejected verified-telemetry write attempt as its own
     distinct record type, via the same SHA-256/JSON-LD mechanism as
     the other emit_*() functions in this module. Kept separate from
     emit_sensor_zone_state_evidence()'s SensorZoneStateRecord type —
@@ -224,7 +225,7 @@ def emit_sensor_zone_rejection_evidence(
 
 def emit_profile_rejection_evidence(claim_id: str, profile_id: Optional[str], reason_code: str) -> dict:
     """
-    GO Freshness Phase 3a, Part A (2026-08-31): signs a rejected
+    GO Freshness Phase 3a, Part A (2026-08-31): hashes a rejected
     profile_id requirement check as its own distinct record type, via
     the same SHA-256/JSON-LD mechanism as the other emit_*() functions
     in this module -- mirrors emit_sensor_zone_rejection_evidence()'s
@@ -265,7 +266,7 @@ def emit_profile_rejection_evidence(claim_id: str, profile_id: Optional[str], re
 def emit_project_scope_rejection_evidence(claim_id: str, project_id: str, reason_code: str) -> dict:
     """
     Project-scoping boundary (2026-09-15, Ring-Fencing Concept Note,
-    26 Aug 2026 -- Willy-authorized implementation): signs a rejected
+    26 Aug 2026 -- Willy-authorized implementation): hashes a rejected
     cross-project reference check as its own distinct record type, via
     the same SHA-256/JSON-LD mechanism as the other emit_*() functions
     in this module -- mirrors emit_profile_rejection_evidence()'s shape
@@ -306,7 +307,7 @@ def emit_project_scope_rejection_evidence(claim_id: str, project_id: str, reason
 
 def emit_billing_statement_evidence(statement: dict, delivered: bool, detail: str) -> dict:
     """
-    Signs a billing-statement send attempt (success or failure) as its
+    Hashes a billing-statement send attempt (success or failure) as its
     own distinct record type, via the same SHA-256/JSON-LD mechanism as
     the other emit_*() functions in this module (Hamilton Labs
     statement-of-accounts, 2026-09-01).
@@ -342,7 +343,7 @@ def emit_billing_statement_evidence(statement: dict, delivered: bool, detail: st
 
 def emit_doctrine_submission_evidence(submission: dict, staleness_days: int) -> dict:
     """
-    Signs a DoctrineSubmission creation event as its own distinct
+    Hashes a DoctrineSubmission creation event as its own distinct
     record type, via the same SHA-256/JSON-LD mechanism as the other
     emit_*() functions in this module (Tier 2 CORENET X Parallel Entry,
     2026-09-02).
@@ -357,7 +358,7 @@ def emit_doctrine_submission_evidence(submission: dict, staleness_days: int) -> 
 
     staleness_days (receipt_timestamp minus corenet_x_approval_date) is
     computed by the caller (src/doctrine/router.py) and threaded in
-    here as a derived value -- surfaced only inside this signed record,
+    here as a derived value -- surfaced only inside this hashed record,
     never its own persisted column anywhere (see
     src/doctrine/models.py's module docstring).
     """
@@ -377,7 +378,7 @@ def emit_doctrine_submission_evidence(submission: dict, staleness_days: int) -> 
 
 def emit_regulatory_instrument_evidence(instrument: dict, staleness_days: int, days_until_effective: int) -> dict:
     """
-    Signs a RegulatoryInstrument creation event as its own distinct
+    Hashes a RegulatoryInstrument creation event as its own distinct
     record type, via the same SHA-256/JSON-LD mechanism as the other
     emit_*() functions in this module (Step 1, 2026-10-11) -- mirrors
     emit_doctrine_submission_evidence()'s shape exactly.
@@ -391,7 +392,7 @@ def emit_regulatory_instrument_evidence(instrument: dict, staleness_days: int, d
     days_until_effective (effective_date minus receipt date; negative
     when the instrument was already in effect on receipt) are computed
     by the caller (src/regulatory/router.py) and surfaced only inside
-    this signed record, never as persisted columns.
+    this hashed record, never as persisted columns.
     """
     record = {
         "@context": "https://synapse.org/schemas/audit/v1",
@@ -410,7 +411,7 @@ def emit_regulatory_instrument_evidence(instrument: dict, staleness_days: int, d
 
 def emit_certified_profile_evidence(profile: dict) -> dict:
     """
-    Signs a CertifiedProfile creation event as its own distinct record
+    Hashes a CertifiedProfile creation event as its own distinct record
     type, via the same SHA-256/JSON-LD mechanism as the other emit_*()
     functions in this module (Step 2, 2026-10-11).
 
@@ -436,7 +437,7 @@ def emit_certified_profile_evidence(profile: dict) -> dict:
 
 def emit_override_evidence(override: dict) -> dict:
     """
-    Signs an admin-override event as its own distinct record type,
+    Hashes an admin-override event as its own distinct record type,
     via the same SHA-256/JSON-LD mechanism as emit_evidence(). Takes a
     plain dict (the validated src/supervisor/schemas.py OverrideRecord,
     dumped) rather than importing that type directly, so this module

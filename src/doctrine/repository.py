@@ -41,7 +41,7 @@ async def persist_doctrine_submission(session: AsyncSession, submission: dict) -
 
 
 async def persist_doctrine_submission_receipt(session: AsyncSession, evidence: dict) -> None:
-    """Appends a signed DoctrineSubmissionReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
+    """Appends a hashed DoctrineSubmissionReceiptRecord to its own audit trail -- never updates or deletes existing rows."""
     session.add(
         DoctrineSubmissionReceiptAuditEntry(
             submission_id=evidence["submission"]["submission_id"],

@@ -19,7 +19,7 @@ from src.billing.models import BillingStatementAuditEntry
 
 async def persist_billing_statement_record(session: AsyncSession, evidence: dict) -> None:
     """
-    Appends a signed BillingStatementRecord to its own audit trail --
+    Appends a hashed BillingStatementRecord to its own audit trail --
     never updates or deletes existing rows, same discipline as every
     other persist_*_record() in this codebase. Called for every send
     attempt regardless of outcome -- evidence["delivered"] is False

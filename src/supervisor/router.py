@@ -23,7 +23,7 @@ src/airlock/router.py) before the handler body runs.
 Historical context, retained for anyone reading git history: this
 endpoint previously validated the request, authorized it and checked
 claim existence via evaluate_override(), and -- only if accepted --
-persisted a signed OverrideRecord evidence entry and pushed a Maestro
+persisted a hashed OverrideRecord evidence entry and pushed a Maestro
 alert. See CLAUDE.md's Admin-Override Evidence/Notification Principles
 for that retired design, and the Supervisor Override Retirement
 principle for why it no longer runs.
@@ -202,7 +202,7 @@ async def blocked_screen_status(
     original evidence's timestamp when nothing changed, or the newly
     written transition evidence's timestamp when a transition just got
     persisted (verdict itself carries no evaluated_at -- that's only
-    added at signing time by src/evidence/emitter.py's emit_evidence()).
+    added at hashing time by src/evidence/emitter.py's emit_evidence()).
     """
     evidence = await fetch_latest_adjudication_record(session, claim_id)
 
