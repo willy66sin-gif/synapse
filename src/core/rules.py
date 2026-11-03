@@ -472,13 +472,32 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
     ways at once -- an inadmissible issuer is only reported once the
     permit itself has already checked out, same "least disruption to
     what already reports" choice made in check_zone_safety().
+
+    Lift label (2026-11-03): a claim whose work_type is not high-risk
+    but whose action_type is "LIFT_OPERATION" is treated as LIFTING
+    work for every check below -- it needs a LIFTING permit and an RTO
+    issuer exactly as a declared LIFTING claim does. Each reason for
+    such a claim names LIFTING and adds a clause saying the lift label
+    caused the requirement. A claim whose work_type is already
+    high-risk is unchanged: an EXCAVATION claim labelled
+    LIFT_OPERATION still needs only its own EXCAVATION permit.
     """
-    if claim.work_type not in HIGH_RISK_WORK_TYPES:
+    lift_label = claim.work_type not in HIGH_RISK_WORK_TYPES and claim.action_type == "LIFT_OPERATION"
+
+    if claim.work_type not in HIGH_RISK_WORK_TYPES and not lift_label:
         return RuleOutcome(
             rule_id="ptw_precondition_check",
             passed=True,
             reason=f"No permit required for work_type '{claim.work_type.value}'.",
         )
+
+    work_type = WorkType.LIFTING if lift_label else claim.work_type
+    lift_label_clause = (
+        f" Permit required because action_type 'LIFT_OPERATION' on work_type "
+        f"'{claim.work_type.value}' is treated as LIFTING work."
+        if lift_label
+        else ""
+    )
 
     ctx = claim.ptw_context
 
@@ -488,7 +507,7 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             passed=False,
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided "
-                f"for high-risk work_type '{claim.work_type.value}'."
+                f"for high-risk work_type '{work_type.value}'.{lift_label_clause}"
             ),
         )
 
@@ -498,7 +517,7 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             passed=False,
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' status "
-                f"'{ctx.status}' is not APPROVED."
+                f"'{ctx.status}' is not APPROVED.{lift_label_clause}"
             ),
         )
 
@@ -511,7 +530,7 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             passed=False,
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' is outside its "
-                f"valid window ({ctx.valid_from} to {ctx.valid_until})."
+                f"valid window ({ctx.valid_from} to {ctx.valid_until}).{lift_label_clause}"
             ),
         )
 
@@ -521,18 +540,18 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             passed=False,
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' zone "
-                f"'{ctx.zone_id}' does not match claim zone '{claim.zone_id}'."
+                f"'{ctx.zone_id}' does not match claim zone '{claim.zone_id}'.{lift_label_clause}"
             ),
         )
 
-    if ctx.permit_type != claim.work_type:
+    if ctx.permit_type != work_type:
         return RuleOutcome(
             rule_id="ptw_precondition_check",
             passed=False,
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Permit '{ctx.ptw_id}' type "
                 f"'{ctx.permit_type.value}' does not match claimed work_type "
-                f"'{claim.work_type.value}'."
+                f"'{work_type.value}'.{lift_label_clause}"
             ),
         )
 
@@ -544,14 +563,14 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             reason=(
                 f"FAIL_CLOSED_EPTW_PRECONDITION: Issuer does not hold an admissible role "
                 f"({sorted(role.value for role in admissible_roles)}) for high-risk "
-                f"work_type '{claim.work_type.value}'."
+                f"work_type '{work_type.value}'.{lift_label_clause}"
             ),
         )
 
     return RuleOutcome(
         rule_id="ptw_precondition_check",
         passed=True,
-        reason=f"Permit '{ctx.ptw_id}' validated for '{claim.work_type.value}'.",
+        reason=f"Permit '{ctx.ptw_id}' validated for '{work_type.value}'.{lift_label_clause}",
     )
 
 

@@ -11,6 +11,8 @@ never touches a database or cache itself — IssuerRecord/ZoneRecord
 stand in for what src/core/repository.py would have fetched from
 PostgreSQL/Redis, so these are plain synchronous unit tests.
 """
+from datetime import datetime, timedelta, timezone
+
 from src.airlock.schemas import ClaimPayload
 from src.core.evaluator import adjudicate
 from src.core.roles import AuthorityRoleType
@@ -51,6 +53,24 @@ def _claim(**overrides) -> ClaimPayload:
         "work_type": "NOMINAL_CIVIL",  # bypasses the ePTW gate — these tests predate it
     }
     base.update(overrides)
+    # 2026-11-03: Rule 0 now treats a LIFT_OPERATION label on non-high-risk
+    # work as LIFTING work needing a permit. A lift claim that doesn't pick
+    # its own work_type is therefore built as declared LIFTING work with a
+    # valid permit (window around real now, same zone, RTO issuer via
+    # SUPERINTENDENT_ROLES), so it still reaches Rule 2 as these tests
+    # intend. Pattern from tests/test_lifting_civil_hotwork_confined_matrix.py.
+    if base["action_type"] == "LIFT_OPERATION" and "work_type" not in overrides:
+        now = datetime.now(timezone.utc)
+        base["work_type"] = "LIFTING"
+        base["ptw_context"] = {
+            "ptw_id": "PTW-2026-0110",
+            "status": "APPROVED",
+            "valid_from": (now - timedelta(hours=24)).isoformat(),
+            "valid_until": (now + timedelta(hours=24)).isoformat(),
+            "permit_type": "LIFTING",
+            "zone_id": base["zone_id"],
+            "issuer_id": base["issuer_id"],
+        }
     return ClaimPayload(**base)
 
 
@@ -339,3 +359,77 @@ def test_non_lift_claim_with_missing_hazard_level_is_unchanged():
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
+
+
+# --- Rule 0 lift label (2026-11-03): a NOMINAL_CIVIL claim labelled
+# LIFT_OPERATION is treated as LIFTING work and needs a LIFTING permit.
+# work_type is passed explicitly so _claim() keeps it NOMINAL_CIVIL.
+
+LIFT_LABEL_CLAUSE = (
+    " Permit required because action_type 'LIFT_OPERATION' on work_type 'NOMINAL_CIVIL' is treated as LIFTING work."
+)
+
+
+def _permit(permit_type: str, zone_id: str = "ZONE-01") -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "ptw_id": "PTW-2026-0120",
+        "status": "APPROVED",
+        "valid_from": (now - timedelta(hours=24)).isoformat(),
+        "valid_until": (now + timedelta(hours=24)).isoformat(),
+        "permit_type": permit_type,
+        "zone_id": zone_id,
+        "issuer_id": "USR-SUP-01",
+    }
+
+
+def test_nominal_civil_lift_label_without_permit_is_rejected_at_rule_0():
+    claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL")
+
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+
+    assert verdict["decision"] == "NO_GO"
+    assert verdict["reason_code"] == "R-PTW-01"
+    assert verdict["reason"] == (
+        "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'LIFTING'."
+        + LIFT_LABEL_CLAUSE
+    )
+    assert [entry["rule_id"] for entry in verdict["rule_trace"]] == ["ptw_precondition_check"]
+
+
+def test_nominal_civil_lift_label_with_lifting_permit_proceeds_to_rule_2():
+    claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL", ptw_context=_permit("LIFTING"))
+
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+
+    assert verdict["decision"] == "GO"
+    assert verdict["reason_code"] is None
+    assert verdict["rule_trace"][0] == {
+        "rule_id": "ptw_precondition_check",
+        "passed": True,
+        "reason": "Permit 'PTW-2026-0120' validated for 'LIFTING'." + LIFT_LABEL_CLAUSE,
+    }
+    assert verdict["rule_trace"][2] == {"rule_id": "zone_safety_check", "passed": True, "reason": "Zone Safety Validated"}
+
+
+def test_nominal_civil_lift_label_with_wrong_permit_type_is_rejected_at_rule_0():
+    claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL", ptw_context=_permit("EXCAVATION"))
+
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+
+    assert verdict["decision"] == "NO_GO"
+    assert verdict["reason_code"] == "R-PTW-01"
+    assert verdict["reason"] == (
+        "FAIL_CLOSED_EPTW_PRECONDITION: Permit 'PTW-2026-0120' type 'EXCAVATION' does not match claimed "
+        "work_type 'LIFTING'." + LIFT_LABEL_CLAUSE
+    )
+
+
+def test_nominal_civil_material_entry_without_permit_is_still_cleared():
+    claim = _claim(work_type="NOMINAL_CIVIL")
+
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+
+    assert verdict["decision"] == "GO"
+    assert verdict["reason_code"] is None
+    assert verdict["rule_trace"][0]["reason"] == "No permit required for work_type 'NOMINAL_CIVIL'."
