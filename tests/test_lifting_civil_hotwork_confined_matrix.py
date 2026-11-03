@@ -9,13 +9,17 @@ adapters, retained sessions for inspecting persisted
 AdjudicationAuditEntry rows. Copied, not imported: tests/ is not a
 package.
 
-Zone hazard values: only "LOW" and "HIGH" are used anywhere in tests/.
-HIGH_HAZARD_ZONE below takes its values from tests/test_adjudication.py:38
-(hazard_level="HIGH", active_crane=True), written in the Redis-hash
-string form of tests/test_airlock_maestro.py:40.
+Zone hazard values: "LOW" and "HIGH" are the only recognised values
+(src/core/rules.py's VALID_HAZARD_LEVELS). This file also uses a zone
+hash with no hazard_level field at all (ZONE_WITHOUT_HAZARD_LEVEL);
+tests/test_adjudication.py also uses None, "MEDIUM" and "High", all of
+which a lift claim must fail on. HIGH_HAZARD_ZONE below takes its values
+from tests/test_adjudication.py:40 (hazard_level="HIGH",
+active_crane=True), written in the Redis-hash string form of
+tests/test_airlock_maestro.py:40.
 
 Permit windows span real now +/- 24h -- wide enough that the wall-clock
-read in verify_ptw_precondition (src/core/rules.py:376) cannot land at
+read in verify_ptw_precondition (src/core/rules.py:524) cannot land at
 an edge during a test run. The clock is never monkeypatched.
 """
 import hashlib
