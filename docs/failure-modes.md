@@ -33,28 +33,36 @@ structural-rejection case in Part 1B.
 
 ### R-PTW-01 — ePTW Precondition Failure
 
-- **Trigger:** `claim.work_type` is one of `EXCAVATION`/`LIFTING`/`HOT_WORK`/`CONFINED_SPACE`
-  (`HIGH_RISK_WORK_TYPES`) and the submitted `ptw_context` is missing, not
-  `APPROVED`, outside its `valid_from`/`valid_until` window, zone-mismatched,
-  type-mismatched, or the issuer lacks an admissible role (`RTO`) for it.
-  `[Repository-grounded]` `src/core/rules.py:309-409` (`verify_ptw_precondition`),
-  `src/core/rules.py:128,160`.
+- **Trigger:** the claim needs a permit, and the submitted `ptw_context` is
+  missing, not `APPROVED`, outside its `valid_from`/`valid_until` window,
+  zone-mismatched, type-mismatched, or the issuer lacks an admissible role (`RTO`)
+  for it. A claim needs a permit when `claim.work_type` is one of
+  `EXCAVATION`/`LIFTING`/`HOT_WORK`/`CONFINED_SPACE` (`HIGH_RISK_WORK_TYPES`), or
+  — since 2026-11-03 — when `claim.work_type` is not high-risk but
+  `claim.action_type` is `"LIFT_OPERATION"`: that lift-labelled claim is treated
+  as `LIFTING` work and needs a `LIFTING` permit. A claim whose `work_type` is
+  already high-risk still needs only its own permit type.
+  `[Repository-grounded]` `src/core/rules.py:455-574` (`verify_ptw_precondition`;
+  lift label at `:485`), `src/core/rules.py:157,262-264,286`.
 - **Output shape:** `POST /airlock/claims` still returns **HTTP 200** (this
   endpoint's own convention — NO_GO is a valid outcome, not an HTTP error). Body is
   the hashed `AdjudicationRecord`: `decision: "NO_GO"`, `reason_code: "R-PTW-01"`,
-  a human-readable `reason` string (one of five variants depending on which
-  sub-condition failed — see `src/core/rules.py:339-403`), `rule_trace` containing
+  a human-readable `reason` string (one of six variants depending on which
+  sub-condition failed — see `src/core/rules.py:504-568`; for a lift-labelled claim
+  each variant names `LIFTING` and adds a clause saying the lift label caused the
+  permit requirement), `rule_trace` containing
   exactly one entry (`ptw_precondition_check`, `passed: false`) since Rule 0
   short-circuits before Rule 1/Rule 2 ever run, and `authority_binding_id`
   resolved to `["BIND-RTO-01"]`. `[Repository-grounded]`
-  `src/core/evaluator.py:94-103`, `src/evidence/emitter.py:83-106`,
-  `src/maestro/directory.py:326`. Also fires a Maestro alert (WhatsApp + Telegram
+  `src/core/evaluator.py:122-131`, `src/evidence/emitter.py:93-116`,
+  `src/maestro/directory.py:351`. Also fires a Maestro alert (WhatsApp + Telegram
   stub adapters) synchronously in the request path. `[Repository-grounded]`
-  `src/airlock/router.py:175-178`.
+  `src/airlock/router.py:223-226`.
 - **Distinguishing from a structural rejection:** a structural rejection (Part 1B)
   never reaches `adjudicate()` at all and carries no `reason_code`. This code means
-  the claim's *shape* was fine — a real, well-formed high-risk-work claim was
-  submitted — but its *permit content* failed a specific, named condition.
+  the claim's *shape* was fine — a real, well-formed high-risk-work (or
+  lift-labelled) claim was submitted — but its *permit content* failed a specific,
+  named condition.
 
 ### R-AUTH-01 — Authority Failure (unauthenticated issuer)
 
@@ -111,17 +119,22 @@ structural-rejection case in Part 1B.
 
 ### R-ZONE-01 — Safety Violation / Zone Safety Failure
 
-- **Trigger:** three independent conditions collapse to this one code —
-  (a) `zone_id` does not exist in Redis at all, (b) a `LIFT_OPERATION`
-  `action_type` in a `HIGH` hazard-level zone, or (c) issuer lacks the admissible
-  role (`SA`) for the zone. `[Repository-grounded]` `src/core/rules.py:261-306`.
+- **Trigger:** four independent conditions collapse to this one code —
+  (a) `zone_id` does not exist in Redis at all, (b) a lift claim in a zone whose
+  `hazard_level` is missing or is not exactly `"LOW"` or `"HIGH"`
+  (`VALID_HAZARD_LEVELS`, case-sensitive; added 2026-11-02), (c) a lift claim in a
+  `HIGH` hazard-level zone, or (d) issuer lacks the admissible role (`SA`) for the
+  zone. A claim counts as a lift when its `action_type` is `"LIFT_OPERATION"` or —
+  since 2026-11-03 — its `work_type` is `LIFTING`, whatever its `action_type`.
+  `[Repository-grounded]` `src/core/rules.py:387-452` (`check_zone_safety`; lift
+  test at `:418`), `src/core/rules.py:83`.
 - **Output shape:** HTTP 200, `reason_code: "R-ZONE-01"`, `reason` text varies by
-  which of the three sub-conditions fired (`src/core/rules.py:284-304`),
+  which of the four sub-conditions fired (`src/core/rules.py:407-450`),
   `rule_trace` has three entries (Rule 0 and Rule 1 both passed). Routes to
   `["BIND-SA-01"]` — the one authority-routing decision with the longest
   unambiguous confirmation history in the repo.
-  `[Repository-grounded]` `src/maestro/directory.py:147-170,324`.
-- **Distinguishing from a structural rejection:** all three sub-triggers require a
+  `[Repository-grounded]` `src/maestro/directory.py:147-170,349`.
+- **Distinguishing from a structural rejection:** all four sub-triggers require a
   well-formed claim referencing a specific zone and action — Airlock has no
   concept of "zone" validity at the schema level, only that `zone_id`/`action_type`
   are present and are strings.
