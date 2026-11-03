@@ -258,16 +258,19 @@ def test_lifting_lift_operation_in_low_hazard_zone_is_go(maestro_calls):
 
 
 # 3
-def test_lifting_without_lift_operation_label_in_high_hazard_zone_is_go(maestro_calls):
-    # pins CURRENT behaviour; the check keys on the action_type label, not
-    # work_type. Open design question, not an endorsement.
+def test_lifting_without_lift_operation_label_in_high_hazard_zone_fails_r_zone_01(maestro_calls):
+    # Since 2026-11-03 Rule 2 treats a claim as a lift when its work_type
+    # is LIFTING, whatever its action_type label, so a LIFTING claim
+    # labelled CRANE_RIGGING is blocked in a HIGH zone like a
+    # LIFT_OPERATION claim. (Before, only the label counted and this was GO.)
     sessions: list = []
     client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=HIGH_HAZARD_ZONE)
 
     claim = _claim(WorkType.LIFTING, "CRANE_RIGGING", _ptw_context(WorkType.LIFTING))
     response = client.post("/airlock/claims", json=claim)
 
-    _assert_go(response, sessions, maestro_calls)
+    evidence = _assert_no_go(response, sessions, maestro_calls, "R-ZONE-01", ZONE_FAIL_AFTER_0_AND_1)
+    assert "Heavy lift requested in high-hazard zone 'ZONE-B3'" in evidence["reason"]
 
 
 # 4
@@ -361,6 +364,42 @@ def test_nominal_civil_non_lift_in_zone_with_no_hazard_level_is_go(maestro_calls
     client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=ZONE_WITHOUT_HAZARD_LEVEL)
 
     claim = _claim(WorkType.NOMINAL_CIVIL, "MATERIAL_ENTRY", None)
+    response = client.post("/airlock/claims", json=claim)
+
+    _assert_go(response, sessions, maestro_calls)
+
+
+# 11
+def test_lifting_without_lift_operation_label_in_zone_with_no_hazard_level_fails_r_zone_01(maestro_calls):
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=ZONE_WITHOUT_HAZARD_LEVEL)
+
+    claim = _claim(WorkType.LIFTING, "CRANE_RIGGING", _ptw_context(WorkType.LIFTING))
+    response = client.post("/airlock/claims", json=claim)
+
+    evidence = _assert_no_go(response, sessions, maestro_calls, "R-ZONE-01", ZONE_FAIL_AFTER_0_AND_1)
+    assert "Hazard level for zone 'ZONE-B3' is missing or unrecognised (None)" in evidence["reason"]
+
+
+# 12
+def test_lifting_without_lift_operation_label_in_low_hazard_zone_is_go(maestro_calls):
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=LOW_HAZARD_ZONE)
+
+    claim = _claim(WorkType.LIFTING, "CRANE_RIGGING", _ptw_context(WorkType.LIFTING))
+    response = client.post("/airlock/claims", json=claim)
+
+    _assert_go(response, sessions, maestro_calls)
+
+
+# 13
+def test_excavation_non_lift_label_in_zone_with_no_hazard_level_is_go(maestro_calls):
+    # Neither a LIFT_OPERATION label nor work_type LIFTING: not a lift, so
+    # the missing hazard level does not block it.
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=ZONE_WITHOUT_HAZARD_LEVEL)
+
+    claim = _claim(WorkType.EXCAVATION, "CRANE_RIGGING", _ptw_context(WorkType.EXCAVATION))
     response = client.post("/airlock/claims", json=claim)
 
     _assert_go(response, sessions, maestro_calls)
