@@ -403,3 +403,20 @@ def test_excavation_non_lift_label_in_zone_with_no_hazard_level_is_go(maestro_ca
     response = client.post("/airlock/claims", json=claim)
 
     _assert_go(response, sessions, maestro_calls)
+
+
+# 14
+def test_nominal_civil_lift_label_without_permit_fails_r_ptw_01(maestro_calls):
+    # Since 2026-11-03 Rule 0 treats a LIFT_OPERATION label on NOMINAL_CIVIL
+    # work as LIFTING work, so a missing permit stops it at Rule 0.
+    sessions: list = []
+    client = _client_with_stubs(sessions, RTO_AND_SA, zone_data=LOW_HAZARD_ZONE)
+
+    claim = _claim(WorkType.NOMINAL_CIVIL, "LIFT_OPERATION", None)
+    response = client.post("/airlock/claims", json=claim)
+
+    evidence = _assert_no_go(response, sessions, maestro_calls, "R-PTW-01", [("ptw_precondition_check", False)])
+    assert evidence["reason"] == (
+        "FAIL_CLOSED_EPTW_PRECONDITION: No permit-to-work context provided for high-risk work_type 'LIFTING'. "
+        "Permit required because action_type 'LIFT_OPERATION' on work_type 'NOMINAL_CIVIL' is treated as LIFTING work."
+    )
