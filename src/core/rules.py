@@ -79,7 +79,7 @@ class ZoneRecord:
 # exactly these two, case-sensitive. ZoneRecord.hazard_level stays a
 # plain str -- src/core/repository.py's fetch_zone_record() returns None
 # for it when the Redis hash has no such field -- so membership is
-# checked in check_zone_safety(), below, for LIFT_OPERATION claims only.
+# checked in check_zone_safety(), below, for lift claims only.
 VALID_HAZARD_LEVELS = frozenset({"LOW", "HIGH"})
 
 
@@ -411,11 +411,17 @@ def check_zone_safety(
             reason=f"Safety Violation: Zone '{claim.zone_id}' does not exist.",
         )
 
+    # A claim counts as a lift (2026-11-03) when its action_type is
+    # "LIFT_OPERATION" or its work_type is LIFTING -- so a LIFTING claim
+    # carrying some other action label (e.g. "CRANE_RIGGING") gets both
+    # lift checks below. Before this, only the action_type label counted.
+    is_lift = claim.action_type == "LIFT_OPERATION" or claim.work_type == WorkType.LIFTING
+
     # Fail closed (2026-11-02): a lift cannot be cleared against a zone
     # whose hazard level is missing or not in VALID_HAZARD_LEVELS --
     # otherwise anything but the exact string "HIGH" would pass the
-    # check below. Other action types are unchanged.
-    if claim.action_type == "LIFT_OPERATION" and zone_record.hazard_level not in VALID_HAZARD_LEVELS:
+    # check below. Non-lift claims are unchanged.
+    if is_lift and zone_record.hazard_level not in VALID_HAZARD_LEVELS:
         return RuleOutcome(
             rule_id="zone_safety_check",
             passed=False,
@@ -425,7 +431,7 @@ def check_zone_safety(
             ),
         )
 
-    if claim.action_type == "LIFT_OPERATION" and zone_record.hazard_level == "HIGH":
+    if is_lift and zone_record.hazard_level == "HIGH":
         return RuleOutcome(
             rule_id="zone_safety_check",
             passed=False,
