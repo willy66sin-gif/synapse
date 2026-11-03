@@ -267,3 +267,75 @@ def test_adjudicate_returns_deterministic_verdict():
     )
 
     assert first == second
+
+
+# --- hazard_level fail-closed (2026-11-02): a LIFT_OPERATION claim
+# against a zone whose hazard_level is missing or not exactly "LOW" or
+# "HIGH" is NO_GO under R-ZONE-01. hazard_level=None is what
+# fetch_zone_record() returns when the Redis hash has no such field.
+
+
+def _lift_claim() -> ClaimPayload:
+    return _claim(claim_id="CLM-110", zone_id="ZONE-02", action_type="LIFT_OPERATION", payload_data={"crane_id": "CR-01"})
+
+
+def _assert_unrecognised_hazard_no_go(verdict, hazard_level) -> None:
+    assert verdict["decision"] == "NO_GO"
+    assert verdict["reason_code"] == "R-ZONE-01"
+    assert verdict["reason"] == (
+        f"Safety Violation: Hazard level for zone 'ZONE-02' is missing or unrecognised "
+        f"({hazard_level!r}); lift operation cannot be cleared."
+    )
+    assert verdict["rule_trace"][-1] == {"rule_id": "zone_safety_check", "passed": False, "reason": verdict["reason"]}
+
+
+def test_lift_operation_with_missing_hazard_level_is_blocked():
+    zone = ZoneRecord(hazard_level=None, active_crane=True)
+
+    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+
+    _assert_unrecognised_hazard_no_go(verdict, None)
+
+
+def test_lift_operation_with_unknown_hazard_level_is_blocked():
+    zone = ZoneRecord(hazard_level="MEDIUM", active_crane=True)
+
+    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+
+    _assert_unrecognised_hazard_no_go(verdict, "MEDIUM")
+
+
+def test_lift_operation_with_differently_cased_hazard_level_is_blocked():
+    zone = ZoneRecord(hazard_level="High", active_crane=True)
+
+    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+
+    _assert_unrecognised_hazard_no_go(verdict, "High")
+
+
+def test_lift_operation_in_low_hazard_zone_is_still_cleared():
+    verdict = adjudicate(
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
+
+    assert verdict["decision"] == "GO"
+    assert verdict["reason_code"] is None
+
+
+def test_lift_operation_in_high_hazard_zone_reason_is_unchanged():
+    verdict = adjudicate(
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+    )
+
+    assert verdict["decision"] == "NO_GO"
+    assert verdict["reason_code"] == "R-ZONE-01"
+    assert verdict["reason"] == "Safety Violation: Heavy lift requested in high-hazard zone 'ZONE-02'."
+
+
+def test_non_lift_claim_with_missing_hazard_level_is_unchanged():
+    zone = ZoneRecord(hazard_level=None, active_crane=False)
+
+    verdict = adjudicate(_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+
+    assert verdict["decision"] == "GO"
+    assert verdict["reason_code"] is None
