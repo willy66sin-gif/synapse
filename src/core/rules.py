@@ -3,11 +3,12 @@ Rule definitions & state checkers.
 
 Zero-generation logic only. Every function here must be pure and
 deterministic: same input -> same output, no external calls, no
-probabilistic scoring, no LLM/NLP calls of any kind. One exception
-(2026-11-02): Rule 0 (verify_ptw_precondition) reads the wall clock
-to check the permit's valid_from/valid_until window, so the same claim
-can get a different outcome at a different time -- see
-src/core/evaluator.py's adjudicate() docstring, which says the same.
+probabilistic scoring, no LLM/NLP calls of any kind. Nothing here
+reads a clock (2026-11-08): Rule 0 (verify_ptw_precondition) judges
+the permit's valid_from/valid_until window against an evaluation_time
+the caller supplies, and Rule 3 judges against a caller-supplied
+as_of -- so the same claim with the same times always gets the same
+outcome. See src/core/evaluator.py's adjudicate() docstring.
 
 Ported from synapse_mdm.py's `adjudicate` method (Rule 1: Authority
 Check, Rule 2: Physical Boundary & Zone Safety Check). The reference
@@ -452,7 +453,9 @@ def check_zone_safety(
     return RuleOutcome(rule_id="zone_safety_check", passed=True, reason="Zone Safety Validated")
 
 
-def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRoleType]) -> RuleOutcome:
+def verify_ptw_precondition(
+    claim: ClaimPayload, issuer_roles: list[AuthorityRoleType], evaluation_time: Optional[datetime]
+) -> RuleOutcome:
     """
     Rule 0: ePTW Precondition Check. Gatekeeper — src/core/evaluator.py
     runs this before Rule 1 (authority) and Rule 2 (zone safety).
@@ -481,7 +484,19 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
     caused the requirement. A claim whose work_type is already
     high-risk is unchanged: an EXCAVATION claim labelled
     LIFT_OPERATION still needs only its own EXCAVATION permit.
+
+    evaluation_time (2026-11-08): the time the permit's
+    valid_from/valid_until window is judged against, supplied by the
+    caller -- this function reads no clock. Required as an argument; a
+    naive (timezone-less) value raises, same as Rule 3's as_of. None is
+    accepted only for a claim that never reaches the window check (no
+    permit needed, permit missing, or not APPROVED); reaching the
+    window check with None is a caller bug and raises rather than
+    guessing a time.
     """
+    if evaluation_time is not None and evaluation_time.tzinfo is None:
+        raise ValueError("evaluation_time must be timezone-aware.")
+
     lift_label = claim.work_type not in HIGH_RISK_WORK_TYPES and claim.action_type == "LIFT_OPERATION"
 
     if claim.work_type not in HIGH_RISK_WORK_TYPES and not lift_label:
@@ -521,10 +536,11 @@ def verify_ptw_precondition(claim: ClaimPayload, issuer_roles: list[AuthorityRol
             ),
         )
 
-    now = datetime.now(timezone.utc)
+    if evaluation_time is None:
+        raise ValueError("evaluation_time is required to check the permit's valid_from/valid_until window.")
     valid_from = datetime.fromisoformat(ctx.valid_from)
     valid_until = datetime.fromisoformat(ctx.valid_until)
-    if now < valid_from or now > valid_until:
+    if evaluation_time < valid_from or evaluation_time > valid_until:
         return RuleOutcome(
             rule_id="ptw_precondition_check",
             passed=False,

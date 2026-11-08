@@ -39,6 +39,11 @@ NO_ROLES: list[AuthorityRoleType] = []
 LOW_HAZARD_ZONE = ZoneRecord(hazard_level="LOW", active_crane=False)
 HIGH_HAZARD_ZONE = ZoneRecord(hazard_level="HIGH", active_crane=True)
 
+# Rule 0 judges a permit's window against a caller-supplied evaluation_time
+# (2026-11-08): Core reads no clock. The permits built below are windowed
+# around this time, and the tests that reach Rule 0's window check pass it.
+EVALUATION_TIME = datetime.now(timezone.utc)
+
 
 def _claim(**overrides) -> ClaimPayload:
     base = {
@@ -60,7 +65,7 @@ def _claim(**overrides) -> ClaimPayload:
     # SUPERINTENDENT_ROLES), so it still reaches Rule 2 as these tests
     # intend. Pattern from tests/test_lifting_civil_hotwork_confined_matrix.py.
     if base["action_type"] == "LIFT_OPERATION" and "work_type" not in overrides:
-        now = datetime.now(timezone.utc)
+        now = EVALUATION_TIME
         base["work_type"] = "LIFTING"
         base["ptw_context"] = {
             "ptw_id": "PTW-2026-0110",
@@ -98,7 +103,8 @@ def test_lift_operation_in_high_hazard_zone_is_blocked():
     )
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "NO_GO"
@@ -194,7 +200,10 @@ def test_r_auth_02_is_unreachable_for_high_risk_work_given_a_valid_permit():
         },
     )
 
-    verdict = adjudicate(claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES)
+    verdict = adjudicate(
+        claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-PTW-01"
@@ -267,7 +276,8 @@ def test_hazard_violation_reason_unchanged_when_sa_also_missing():
     )
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=[AuthorityRoleType.RTO]
+        claim, issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=[AuthorityRoleType.RTO],
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "NO_GO"
@@ -312,7 +322,10 @@ def _assert_unrecognised_hazard_no_go(verdict, hazard_level) -> None:
 def test_lift_operation_with_missing_hazard_level_is_blocked():
     zone = ZoneRecord(hazard_level=None, active_crane=True)
 
-    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     _assert_unrecognised_hazard_no_go(verdict, None)
 
@@ -320,7 +333,10 @@ def test_lift_operation_with_missing_hazard_level_is_blocked():
 def test_lift_operation_with_unknown_hazard_level_is_blocked():
     zone = ZoneRecord(hazard_level="MEDIUM", active_crane=True)
 
-    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     _assert_unrecognised_hazard_no_go(verdict, "MEDIUM")
 
@@ -328,14 +344,18 @@ def test_lift_operation_with_unknown_hazard_level_is_blocked():
 def test_lift_operation_with_differently_cased_hazard_level_is_blocked():
     zone = ZoneRecord(hazard_level="High", active_crane=True)
 
-    verdict = adjudicate(_lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     _assert_unrecognised_hazard_no_go(verdict, "High")
 
 
 def test_lift_operation_in_low_hazard_zone_is_still_cleared():
     verdict = adjudicate(
-        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "GO"
@@ -344,7 +364,8 @@ def test_lift_operation_in_low_hazard_zone_is_still_cleared():
 
 def test_lift_operation_in_high_hazard_zone_reason_is_unchanged():
     verdict = adjudicate(
-        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        _lift_claim(), issuer_record=SUPERINTENDENT, zone_record=HIGH_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "NO_GO"
@@ -371,7 +392,7 @@ LIFT_LABEL_CLAUSE = (
 
 
 def _permit(permit_type: str, zone_id: str = "ZONE-01") -> dict:
-    now = datetime.now(timezone.utc)
+    now = EVALUATION_TIME
     return {
         "ptw_id": "PTW-2026-0120",
         "status": "APPROVED",
@@ -400,7 +421,10 @@ def test_nominal_civil_lift_label_without_permit_is_rejected_at_rule_0():
 def test_nominal_civil_lift_label_with_lifting_permit_proceeds_to_rule_2():
     claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL", ptw_context=_permit("LIFTING"))
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
@@ -415,7 +439,10 @@ def test_nominal_civil_lift_label_with_lifting_permit_proceeds_to_rule_2():
 def test_nominal_civil_lift_label_with_wrong_permit_type_is_rejected_at_rule_0():
     claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL", ptw_context=_permit("EXCAVATION"))
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
+    )
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-PTW-01"

@@ -30,7 +30,7 @@ from before adjudication.
 """
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -215,6 +215,8 @@ async def frontline_status_json(
         issuer_roles,
         certified_profile,
         as_of=await first_adjudicated_at(session, claim_id),
+        # Rule 0's permit window is judged at poll time, not first-adjudication time.
+        evaluation_time=datetime.now(timezone.utc),
     )
 
     if _verdict_transitioned(verdict, evidence):

@@ -61,6 +61,7 @@ difference (no NO_GO-only 409 gate on this endpoint).
 """
 import html
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -227,6 +228,8 @@ async def blocked_screen_status(
         issuer_roles,
         certified_profile,
         as_of=await first_adjudicated_at(session, claim_id),
+        # Rule 0's permit window is judged at poll time, not first-adjudication time.
+        evaluation_time=datetime.now(timezone.utc),
     )
 
     evaluated_at = evidence["evaluated_at"]

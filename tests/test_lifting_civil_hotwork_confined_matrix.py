@@ -18,9 +18,10 @@ from tests/test_adjudication.py:40 (hazard_level="HIGH",
 active_crane=True), written in the Redis-hash string form of
 tests/test_airlock_maestro.py:40.
 
-Permit windows span real now +/- 24h -- wide enough that the wall-clock
-read in verify_ptw_precondition (src/core/rules.py:524) cannot land at
-an edge during a test run. The clock is never monkeypatched.
+Permit windows span real now +/- 24h -- wide enough that the request
+time POST /airlock/claims passes to Rule 0 as evaluation_time
+(src/airlock/router.py) cannot land at an edge during a test run. The
+clock is never monkeypatched.
 """
 import hashlib
 import json

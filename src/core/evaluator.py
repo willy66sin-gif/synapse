@@ -61,6 +61,8 @@ def adjudicate(
     issuer_roles: list[AuthorityRoleType],
     certified_profile: Optional[CertifiedProfile] = None,
     as_of: Optional[datetime] = None,
+    *,
+    evaluation_time: Optional[datetime] = None,
 ) -> Verdict:
     """
     Evaluates a validated claim against Rule 0 (ePTW precondition),
@@ -114,12 +116,23 @@ def adjudicate(
     None so existing callers keep working, the same way
     certified_profile is -- but None is not a quiet default to "now":
     Rule 3 fails closed if it needs a time and was given none (see
-    check_lift_panel_oem_consent()). Rule 0's own permit-window check
-    is unchanged and still reads the wall clock itself.
+    check_lift_panel_oem_consent()).
+
+    evaluation_time (2026-11-08): the time Rule 0 judges the permit's
+    valid_from/valid_until window against, as an already-resolved,
+    timezone-aware value -- distinct from as_of, and passed only to
+    Rule 0. Every production caller passes the request's current time,
+    including the two polling routes, so a permit is still judged at
+    request or poll time, never at first-adjudication time. Keyword-only
+    and defaulted to None so callers whose claims never reach Rule 0's
+    window check keep working; Rule 0 raises if it reaches that check
+    with None (see verify_ptw_precondition()). With as_of and
+    evaluation_time both supplied by the caller, this function reads no
+    clock: the same inputs give the same verdict.
     """
     rule_trace: list[dict] = []
 
-    ptw_outcome = verify_ptw_precondition(claim, issuer_roles)
+    ptw_outcome = verify_ptw_precondition(claim, issuer_roles, evaluation_time)
     rule_trace.append(asdict(ptw_outcome))
     if not ptw_outcome.passed:
         return Verdict(

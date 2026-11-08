@@ -169,8 +169,11 @@ async def submit_claim(
     # adjudication, so "as of" is the server's own clock, read here --
     # never claim.timestamp, which is submitter-supplied and unverified.
     # See adjudicate()'s docstring for what reads it.
+    # evaluation_time (2026-11-08): Rule 0's permit-window time, the
+    # same request time -- read here, at the route, so Core reads no clock.
+    request_time = datetime.now(timezone.utc)
     verdict = adjudicate(
-        claim, issuer_record, zone_record, issuer_roles, profile, as_of=datetime.now(timezone.utc)
+        claim, issuer_record, zone_record, issuer_roles, profile, as_of=request_time, evaluation_time=request_time
     )
     # GO Freshness Phase 3a, Part A: appended here, not inside
     # adjudicate() -- see this function's own docstring above.

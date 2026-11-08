@@ -13,7 +13,7 @@ One extension: _StubSession resolves IssuerRole queries per issuer_id
 fixed list for any issuer. Needed by the split-issuer test, which has to
 tell which issuer's roles Rule 0 actually consults.
 
-Permit windows are built around real now (tests/test_core_eptw.py:38-40
+Permit windows are built around real now (tests/test_core_eptw.py:42-44
 pattern); no test places a timestamp at a permit edge and the clock is
 never monkeypatched.
 

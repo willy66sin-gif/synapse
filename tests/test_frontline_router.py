@@ -19,6 +19,8 @@ fake AsyncSession has to serve three distinct query shapes off the
 same session, same shapes tests/test_airlock_maestro.py's stubs
 already serve for POST /airlock/claims.
 """
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -625,3 +627,67 @@ def test_status_endpoint_does_not_query_profile_when_claim_has_no_profile_id():
 
     assert response.status_code == 200
     assert session.profile_queries == 0
+
+
+# --- Rule 0 evaluation time on a poll (2026-11-08): the status route
+# passes the poll's own time to Rule 0, not the claim's first-adjudication
+# time, so a permit that has expired since submission flips the verdict.
+
+_PERMIT_NOW = datetime.now(timezone.utc)
+EXPIRED_SINCE_SUBMISSION_GO_EVIDENCE = {
+    "claim_id": "CLM-PTW-EXPIRY-501",
+    "decision": "GO",
+    "reason": "Claim 'CLM-PTW-EXPIRY-501' cleared for execution in ZONE-01.",
+    "reason_code": None,
+    "authority_binding_id": None,
+    "rule_trace": [
+        {"rule_id": "ptw_precondition_check", "passed": True, "reason": "Permit 'PTW-501' validated for 'LIFTING'."}
+    ],
+    "evaluated_at": (_PERMIT_NOW - timedelta(hours=3)).isoformat(),
+    "input_payload": {
+        "claim_id": "CLM-PTW-EXPIRY-501",
+        "timestamp": (_PERMIT_NOW - timedelta(hours=3)).isoformat(),
+        "project_id": "PROJ-TEST-01",
+        "issuer_id": "USR-SUP-01",
+        "authority_level": 3,
+        "zone_id": "ZONE-01",
+        "action_type": "LIFT_OPERATION",
+        "payload_data": {},
+        "work_type": WorkType.LIFTING.value,
+        "ptw_context": {
+            "ptw_id": "PTW-501",
+            "status": "APPROVED",
+            "valid_from": (_PERMIT_NOW - timedelta(hours=4)).isoformat(),
+            "valid_until": (_PERMIT_NOW - timedelta(hours=1)).isoformat(),
+            "permit_type": WorkType.LIFTING.value,
+            "zone_id": "ZONE-01",
+            "issuer_id": "USR-SUP-01",
+        },
+        "is_design_alteration": False,
+        "alteration_description": None,
+    },
+    "sha256_signature": "irrelevant-for-this-test",
+}
+
+
+def test_status_poll_after_permit_expiry_flips_go_to_no_go_r_ptw_01():
+    """The claim was GO when first adjudicated, inside its permit window.
+    The window ended an hour ago, so a poll now re-judges Rule 0 at poll
+    time and the verdict flips to NO_GO R-PTW-01, with one new record."""
+    session = _StatusStubSession(
+        evidence_row=_evidence_row(EXPIRED_SINCE_SUBMISSION_GO_EVIDENCE),
+        issuer_row=SUPERINTENDENT_ROW,
+        issuer_roles=SUPERINTENDENT_ROLES,
+    )
+    client = _status_client(zone_data=VALID_LOW_HAZARD_ZONE, session=session)
+
+    response = client.get("/frontline/blocked/CLM-PTW-EXPIRY-501/status")
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "NO_GO"
+    assert response.json()["reasonCode"] == "R-PTW-01"
+    assert len(session.added) == 1
+    written = session.added[0].record
+    assert written["reason_code"] == "R-PTW-01"
+    assert written["rule_trace"][0]["rule_id"] == "ptw_precondition_check"
+    assert "is outside its valid window" in written["rule_trace"][0]["reason"]

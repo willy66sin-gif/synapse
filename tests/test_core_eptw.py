@@ -10,6 +10,8 @@ isolation.
 """
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.airlock.schemas import ClaimPayload, PtwContext, WorkType
 from src.core.evaluator import adjudicate
 from src.core.roles import AuthorityRoleType
@@ -35,6 +37,8 @@ LOW_HAZARD_ZONE = ZoneRecord(hazard_level="LOW", active_crane=False)
 SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
 NO_ROLES: list[AuthorityRoleType] = []
 
+# Permit windows below are built around NOW, and each Rule 0 call is
+# judged at NOW explicitly (evaluation_time, 2026-11-08): Core reads no clock.
 NOW = datetime.now(timezone.utc)
 VALID_FROM = (NOW - timedelta(hours=1)).isoformat()
 VALID_UNTIL = (NOW + timedelta(hours=1)).isoformat()
@@ -77,7 +81,7 @@ def _claim(**overrides) -> ClaimPayload:
 def test_missing_ptw_context_fails_closed():
     claim = _claim(ptw_context=None)
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "FAIL_CLOSED_EPTW_PRECONDITION" in outcome.reason
@@ -86,7 +90,7 @@ def test_missing_ptw_context_fails_closed():
 def test_status_pending_fails_closed():
     claim = _claim(ptw_context=_ptw(status="PENDING"))
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "FAIL_CLOSED_EPTW_PRECONDITION" in outcome.reason
@@ -95,7 +99,7 @@ def test_status_pending_fails_closed():
 def test_status_expired_fails_closed():
     claim = _claim(ptw_context=_ptw(status="EXPIRED"))
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
 
@@ -103,7 +107,7 @@ def test_status_expired_fails_closed():
 def test_status_revoked_fails_closed():
     claim = _claim(ptw_context=_ptw(status="REVOKED"))
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
 
@@ -117,7 +121,7 @@ def test_permit_expired_fails_closed():
         )
     )
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "FAIL_CLOSED_EPTW_PRECONDITION" in outcome.reason
@@ -132,7 +136,7 @@ def test_permit_not_yet_valid_fails_closed():
         )
     )
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "FAIL_CLOSED_EPTW_PRECONDITION" in outcome.reason
@@ -141,7 +145,7 @@ def test_permit_not_yet_valid_fails_closed():
 def test_zone_mismatch_fails_closed():
     claim = _claim(zone_id="ZONE-01", ptw_context=_ptw(zone_id="ZONE-02"))
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "does not match claim zone" in outcome.reason
@@ -150,7 +154,7 @@ def test_zone_mismatch_fails_closed():
 def test_permit_type_mismatch_fails_closed():
     claim = _claim(work_type=WorkType.EXCAVATION, ptw_context=_ptw(permit_type=WorkType.HOT_WORK))
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "does not match claimed work_type" in outcome.reason
@@ -160,7 +164,7 @@ def test_all_four_high_risk_types_require_ptw_when_missing():
     for work_type in (WorkType.EXCAVATION, WorkType.LIFTING, WorkType.HOT_WORK, WorkType.CONFINED_SPACE):
         claim = _claim(work_type=work_type, ptw_context=None)
 
-        outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+        outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
         assert outcome.passed is False, f"{work_type} should require a permit"
 
@@ -176,7 +180,7 @@ def test_missing_rto_admissible_role_fails_closed_with_valid_permit():
     authority_check's admissibility gate."""
     claim = _claim()
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=NO_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=NO_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "FAIL_CLOSED_EPTW_PRECONDITION" in outcome.reason
@@ -187,7 +191,7 @@ def test_rto_admissible_role_present_passes():
     """Positive-path companion: RTO present, valid permit -> passes."""
     claim = _claim()
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=[AuthorityRoleType.RTO])
+    outcome = verify_ptw_precondition(claim, issuer_roles=[AuthorityRoleType.RTO], evaluation_time=NOW)
 
     assert outcome.passed is True
 
@@ -199,7 +203,7 @@ def test_missing_rto_role_does_not_mask_a_missing_permit():
     admissibility one, since the ctx check runs first."""
     claim = _claim(ptw_context=None)
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=NO_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=NO_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is False
     assert "No permit-to-work context provided" in outcome.reason
@@ -211,7 +215,7 @@ def test_missing_rto_role_does_not_mask_a_missing_permit():
 def test_valid_permit_passes():
     claim = _claim()
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is True
     assert outcome.rule_id == "ptw_precondition_check"
@@ -220,7 +224,7 @@ def test_valid_permit_passes():
 def test_nominal_civil_bypasses_precondition_even_without_context():
     claim = _claim(work_type=WorkType.NOMINAL_CIVIL, ptw_context=None)
 
-    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES)
+    outcome = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
 
     assert outcome.passed is True
 
@@ -249,7 +253,8 @@ def test_adjudicate_accepts_valid_high_risk_claim_end_to_end():
     claim = _claim()
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=NOW,
     )
 
     assert verdict["decision"] == "GO"
@@ -278,3 +283,51 @@ def test_adjudicate_nominal_civil_unaffected_by_eptw_gate():
     assert verdict["decision"] == "GO"
     assert verdict["rule_trace"][0]["rule_id"] == "ptw_precondition_check"
     assert verdict["rule_trace"][0]["passed"] is True
+
+
+# --- Rule 0 evaluation time (2026-11-08): Core reads no clock; the
+# permit window is judged against the evaluation_time the caller passes.
+
+
+def test_same_claim_and_same_evaluation_time_give_the_same_outcome_on_repeat_calls():
+    claim = _claim()
+
+    first = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
+    second = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
+    first_verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=NOW,
+    )
+    second_verdict = adjudicate(
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=NOW,
+    )
+
+    assert first == second
+    assert first.passed is True
+    assert first_verdict == second_verdict
+
+
+def test_permit_valid_at_one_evaluation_time_is_expired_at_a_later_one():
+    claim = _claim()
+
+    inside = verify_ptw_precondition(claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW)
+    after = verify_ptw_precondition(
+        claim, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=NOW + timedelta(hours=2)
+    )
+
+    assert inside.passed is True
+    assert after.passed is False
+    assert "is outside its valid window" in after.reason
+
+
+def test_naive_evaluation_time_raises():
+    with pytest.raises(ValueError, match="evaluation_time must be timezone-aware"):
+        verify_ptw_precondition(
+            _claim(), issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=datetime(2026, 11, 8, 12, 0)
+        )
+
+
+def test_reaching_the_window_check_without_an_evaluation_time_raises():
+    with pytest.raises(ValueError, match="evaluation_time is required"):
+        verify_ptw_precondition(_claim(), issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=None)
