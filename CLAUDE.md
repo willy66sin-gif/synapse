@@ -208,7 +208,7 @@ synapse/
 │   │   ├── statement.py          # generate_statement() — reads AdjudicationAuditEntry directly, no separate ledger
 │   │   ├── service.py            # generate_and_send_if_due()/on_claim_finalized()/run_scheduled_check() — the only automatic-pipeline caller, always unscoped by project_id
 │   │   ├── scheduler.py          # is_period_due() cadence check (Settings.billing_statement_cadence_days)
-│   │   ├── email_sender.py       # Fail-closed SMTP delivery — no fake config defaults; every send attempt gets its own signed evidence record
+│   │   ├── email_sender.py       # Fail-closed SMTP delivery — no fake config defaults; every send attempt gets its own hashed evidence record
 │   │   └── repository.py         # persist/fetch billing send records (I/O boundary)
 │   ├── doctrine/                # Project doctrine submission registry, Track B Step 1 (2026-08-12 container; 2026-09-02 write endpoint + Tier 2 CORENET X fields)
 │   │   ├── schemas.py            # DoctrineSubmission; corenet_x_reference/gateway/approval_date/entered_by (2026-09-02); receipt_timestamp is server-set only; GroundingCategory + tagged Citation entries on `citations` (2026-10-11)
