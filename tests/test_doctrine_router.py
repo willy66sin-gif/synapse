@@ -129,7 +129,7 @@ def test_a_complete_submission_is_accepted_and_evidenced():
     expected_staleness = (receipt_timestamp.date() - date(2026, 8, 1)).days
     assert evidence["staleness_days"] == expected_staleness
 
-    # Two rows persisted: the submission itself, and its own signed
+    # Two rows persisted: the submission itself, and its own hashed
     # receipt evidence -- two separate commits, same "distinct evidence
     # types live in distinct tables" convention as every other domain.
     assert len(stub.added) == 2
@@ -215,7 +215,7 @@ def test_tagged_citations_are_persisted_and_signed_in_the_same_shape():
     """
     Doctrine Grounding Standard, Step 0 (2026-10-11): the category tag
     travels with each citation into both the persisted row and the
-    signed evidence record, as its plain string value.
+    hashed evidence record, as its plain string value.
     """
     stub = _StubSession()
 

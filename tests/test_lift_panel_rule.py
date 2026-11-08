@@ -9,7 +9,7 @@ Layers, same shape as the existing rule tests:
     verify_ptw_precondition);
   - adjudicate(), for ordering against Rules 0-2 and what rule_trace
     carries;
-  - the real POST /airlock/claims HTTP layer, for the signed evidence
+  - the real POST /airlock/claims HTTP layer, for the hashed evidence
     record, escalation routing, and the Maestro alert;
   - the two polling routes, for non-retroactivity: a stored claim is
     re-judged as of when it was FIRST adjudicated, not as of the poll.
@@ -557,7 +557,7 @@ def test_http_in_scope_claim_after_the_effective_date_is_no_go_r_lift_01_routed_
     assert evidence["authority_binding_id"] == ["BIND-RTO-LIFT-01"]
 
     # The citation and the time it was judged against are inside the
-    # signed record, on the failing entry. as_of is the server's clock.
+    # hashed record, on the failing entry. as_of is the server's clock.
     lift_entry = _lift_entry(evidence["rule_trace"])
     assert lift_entry["passed"] is False
     assert lift_entry["grounding"] == {**GROUNDING_CITATION, "effective_date": "2026-01-01"}
@@ -567,7 +567,7 @@ def test_http_in_scope_claim_after_the_effective_date_is_no_go_r_lift_01_routed_
         json.dumps(unsigned, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
-    # The three declared flags are part of the signed input payload.
+    # The three declared flags are part of the hashed input payload.
     assert {key: evidence["input_payload"][key] for key in PANEL_WORK_WITHOUT_CONSENT} == PANEL_WORK_WITHOUT_CONSENT
 
     persisted = _audit_entries(session)

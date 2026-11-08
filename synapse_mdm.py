@@ -90,7 +90,7 @@ class SynapseMDM:
     @classmethod
     def emit_evidence(cls, payload: Dict[str, Any], verdict: Verdict, reason: str) -> Dict[str, Any]:
         """
-        Evidence Emitter: Generates immutable, SHA-256 signed JSON-LD execution logs.
+        Evidence Emitter: Generates JSON-LD execution logs carrying a keyless SHA-256 hash.
         """
         log_entry = {
             "@context": "https://synapse.org/schemas/audit/v1",

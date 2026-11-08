@@ -1,13 +1,14 @@
 """
 SQLAlchemy model for persisted adjudication evidence.
 
-Fulfills CLAUDE.md's Technology Stack line ("PostgreSQL: ... immutable
-audit storage"), which was declared from the start but never actually
+Fulfills the audit-storage half of CLAUDE.md's Technology Stack line
+for PostgreSQL, which was declared from the start but never actually
 implemented until now — emit_evidence() stayed a pure, non-persisting
 function; this is the first thing that writes its output anywhere.
 
-Append-only, matching the emitter's own "append-only audit-trail
-logging" language: claim_id is NOT the primary key, so re-adjudicating
+Append-only by application convention only -- no database constraint,
+trigger or grant stops a row being updated or deleted -- matching the
+emitter's own "append-only audit-trail logging" language: claim_id is NOT the primary key, so re-adjudicating
 the same claim_id (however that might happen) adds a new row rather
 than overwriting one. fetch_latest_adjudication_record() reads the
 most recent row for a given claim_id.

@@ -24,7 +24,7 @@ class WhatsAppAdapter(ChannelAdapter):
         return DeliveryResult(
             claim_id=alert.claim_id,
             channel=self.channel_name,
-            delivered=True,
+            delivered=False,  # stub: nothing is sent, so nothing is delivered
             detail=f"[stub] would send WhatsApp message to {alert.recipient_id}: {text}",
         )
 

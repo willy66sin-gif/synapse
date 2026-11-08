@@ -289,7 +289,7 @@ def test_original_malformed_excavation_payload_rejected_with_422(maestro_calls, 
         assert ("missing", ("body", field)) in errors
 
     # RECORDS CURRENT BEHAVIOUR -- OPEN POLICY QUESTION, NOT AN ENDORSEMENT.
-    # A schema-level 422 at the Airlock currently produces no signed
+    # A schema-level 422 at the Airlock currently produces no hashed
     # evidence record of any type: FastAPI rejects the body before
     # submit_claim() runs, and src/main.py registers no
     # RequestValidationError handler. Whether a rejected submission

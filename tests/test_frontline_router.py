@@ -465,7 +465,7 @@ def test_status_endpoint_go_to_no_go_transition_writes_exactly_one_evidence_reco
 
 def test_status_endpoint_no_go_to_go_transition_writes_exactly_one_evidence_record():
     """A poll-detected NO_GO -> GO transition must also get its own
-    signed evidence record -- the locked decision applies symmetrically,
+    hashed evidence record -- the locked decision applies symmetrically,
     not just to the GO -> NO_GO direction."""
     session = _StatusStubSession(
         evidence_row=_evidence_row(NO_GO_TRANSITION_EVIDENCE),

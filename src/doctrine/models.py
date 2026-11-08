@@ -92,7 +92,7 @@ class DoctrineSubmissionReceiptAuditEntry(Base):
     One row per successful DoctrineSubmission creation -- the hashed
     evidence record src/doctrine/router.py emits on every POST
     /doctrine/submissions, per the Tier 2 CORENET X Parallel Entry
-    build's "own signed evidence record on creation" requirement.
+    build's requirement of its own hashed evidence record on creation.
     Append-only, same discipline as every other audit table here.
 
     corenet_x_gateway is pulled out as its own column (the discriminator

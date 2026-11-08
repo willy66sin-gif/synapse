@@ -205,7 +205,7 @@ def test_emit_evidence_defaults_authority_binding_id_to_none():
 
 def test_emit_evidence_persists_provided_authority_binding_id():
     """Escalation Ownership Principle: the resolved authority_binding_id
-    must be part of the signed evidence record, not deferred to a later
+    must be part of the hashed evidence record, not deferred to a later
     phase."""
     result = emit_evidence(CLAIM_PAYLOAD, NO_GO_VERDICT, authority_binding_id="BIND-999")
 
@@ -252,7 +252,7 @@ def test_emit_billing_statement_evidence_is_a_distinct_record_type():
 
 def test_emit_billing_statement_evidence_records_failed_sends_not_just_successes():
     """'every send... including failed-send attempts' -- delivered=False
-    must be a real, distinguishable value on the signed record, not
+    must be a real, distinguishable value on the hashed record, not
     coerced to True or omitted."""
     result = emit_billing_statement_evidence(
         BILLING_STATEMENT, delivered=False, detail="SMTP send failed: relay refused the message"

@@ -22,7 +22,7 @@ class TelegramAdapter(ChannelAdapter):
         return DeliveryResult(
             claim_id=alert.claim_id,
             channel=self.channel_name,
-            delivered=True,
+            delivered=False,  # stub: nothing is sent, so nothing is delivered
             detail=f"[stub] would send Telegram message to chat {alert.recipient_id}: {text}",
         )
 

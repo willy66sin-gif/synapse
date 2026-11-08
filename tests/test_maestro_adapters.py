@@ -46,10 +46,10 @@ ADAPTERS = [WhatsAppAdapter(), TelegramAdapter()]
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.channel_name)
-def test_send_alert_reports_delivered_for_go(adapter):
+def test_send_alert_reports_not_delivered_for_go(adapter):
     result = adapter.send_alert(GO_ALERT)
 
-    assert result.delivered is True
+    assert result.delivered is False  # stub: nothing is actually sent
     assert result.channel == adapter.channel_name
     assert result.claim_id == "CLM-101"
 
@@ -59,7 +59,7 @@ def test_send_alert_never_hides_the_failing_condition(adapter):
     """Even stubbed, the adapter must not collapse NO_GO to a bare verdict."""
     result = adapter.send_alert(NO_GO_ALERT)
 
-    assert result.delivered is True
+    assert result.delivered is False  # stub: nothing is actually sent
     assert "zone_safety_check" in result.detail
     assert "Safety Violation" in result.detail
 

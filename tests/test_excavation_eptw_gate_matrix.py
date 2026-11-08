@@ -182,7 +182,7 @@ def _assert_signature_valid(evidence: dict) -> None:
 
 
 def _assert_no_go(response, sessions, maestro_calls, reason_code: str, core_trace: list[tuple[str, bool]]):
-    """Asserts verdict, reason code, Core rule_trace prefix, signed evidence
+    """Asserts verdict, reason code, Core rule_trace prefix, hashed evidence
     carrying the code (response + persisted row), and the alert's code."""
     assert response.status_code == 200
     evidence = response.json()

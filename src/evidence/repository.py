@@ -1,7 +1,9 @@
 """
-Persistence for hashed evidence records — the "immutable audit
-storage" half of CLAUDE.md's PostgreSQL role (the "rule registry"
-half is src/core/repository.py's AuthorizedIssuer lookups).
+Persistence for hashed evidence records — the audit-storage half of
+CLAUDE.md's PostgreSQL role (the "rule registry" half is
+src/core/repository.py's AuthorizedIssuer lookups). Append-only by
+application convention: this module only inserts rows; no database
+constraint, trigger or grant prevents an update or delete.
 
 Kept alongside src/evidence/emitter.py's pure hashing logic, mirroring
 how src/core/repository.py is kept separate from src/core/rules.py's

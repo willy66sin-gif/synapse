@@ -2,9 +2,9 @@
 SQLAlchemy model for persisted billing-statement send records
 (Hamilton Labs statement-of-accounts, 2026-09-01).
 
-One row per attempted statement send, success or failure -- "every
-send gets its own signed evidence record... including failed-send
-attempts" per this pass's own instruction. Its own table, not folded
+One row per attempted statement send, success or failure -- every
+send gets its own hashed evidence record, including failed-send
+attempts, per this pass's own instruction. Its own table, not folded
 into src/evidence/models.py's AdjudicationAuditEntry, mirrors
 src/airlock/models.py's ProfileRejectionAuditEntry: a billing
 statement is a record ABOUT a batch of adjudications, not an

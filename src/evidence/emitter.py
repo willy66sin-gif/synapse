@@ -40,8 +40,8 @@ Parallel Entry) hashes a sixth, distinct record type for a
 DoctrineSubmission creation event. Not a fail-closed gate — per that
 build's own non-goals, this record does not gate adjudication and
 src/core/ has no knowledge it exists — but creation-event evidencing
-follows the same "every fail-closed gate gets its own signed evidence
-record" discipline per that build's explicit instruction. See its own
+follows the same discipline -- every fail-closed gate gets its own
+hashed evidence record -- per that build's explicit instruction. See its own
 docstring below for staleness_days.
 
 emit_regulatory_instrument_evidence() (2026-10-11, Step 1) hashes a
@@ -312,8 +312,8 @@ def emit_billing_statement_evidence(statement: dict, delivered: bool, detail: st
     the other emit_*() functions in this module (Hamilton Labs
     statement-of-accounts, 2026-09-01).
 
-    "Every send gets its own signed evidence record... including
-    failed-send attempts": delivered=False records a genuinely
+    Every send gets its own hashed evidence record, including
+    failed-send attempts: delivered=False records a genuinely
     attempted, genuinely failed send (an SMTP error, or a missing
     config value caught before ever dialing out) -- never a silently
     skipped one. See src/billing/email_sender.py's fail-closed
