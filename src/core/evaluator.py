@@ -62,7 +62,7 @@ def adjudicate(
     certified_profile: Optional[CertifiedProfile] = None,
     as_of: Optional[datetime] = None,
     *,
-    evaluation_time: Optional[datetime] = None,
+    evaluation_time: datetime,
 ) -> Verdict:
     """
     Evaluates a validated claim against Rule 0 (ePTW precondition),
@@ -123,13 +123,19 @@ def adjudicate(
     timezone-aware value -- distinct from as_of, and passed only to
     Rule 0. Every production caller passes the request's current time,
     including the two polling routes, so a permit is still judged at
-    request or poll time, never at first-adjudication time. Keyword-only
-    and defaulted to None so callers whose claims never reach Rule 0's
-    window check keep working; Rule 0 raises if it reaches that check
-    with None (see verify_ptw_precondition()). With as_of and
+    request or poll time, never at first-adjudication time. Required,
+    keyword-only and timezone-aware (2026-11-09): None or a naive value
+    raises ValueError here, before any rule runs, whether or not the claim
+    would reach Rule 0's window check. verify_ptw_precondition() keeps
+    its own contract, including its own check for None. With as_of and
     evaluation_time both supplied by the caller, this function reads no
     clock: the same inputs give the same verdict.
     """
+    if evaluation_time is None:
+        raise ValueError("evaluation_time is required.")
+    if evaluation_time.tzinfo is None:
+        raise ValueError("evaluation_time must be timezone-aware.")
+
     rule_trace: list[dict] = []
 
     ptw_outcome = verify_ptw_precondition(claim, issuer_roles, evaluation_time)

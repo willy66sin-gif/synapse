@@ -84,7 +84,8 @@ def test_nominal_claim_is_cleared():
     claim = _claim()
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "GO"
@@ -116,7 +117,7 @@ def test_unauthenticated_issuer_is_rejected():
     """synapse_mdm.py's authority-failure case: Authority Failure -> REJECTED."""
     claim = _claim(issuer_id="USR-UNKNOWN")
 
-    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES)
+    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert "Authority Failure" in verdict["reason"]
@@ -140,6 +141,7 @@ def test_issuer_holding_multiple_roles_passes_via_the_one_admissible_role():
         issuer_record=SUPERINTENDENT,
         zone_record=LOW_HAZARD_ZONE,
         issuer_roles=[AuthorityRoleType.PE, AuthorityRoleType.RTO, AuthorityRoleType.SA],
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "GO"
@@ -158,7 +160,7 @@ def test_missing_admissible_role_on_nominal_work_is_rejected():
     read by this decision -- SITE_ENGINEER simply holds no roles."""
     claim = _claim(issuer_id="USR-ENG-02", authority_level=0)  # work_type: NOMINAL_CIVIL, from _claim()'s base
 
-    verdict = adjudicate(claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES)
+    verdict = adjudicate(claim, issuer_record=SITE_ENGINEER, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert "Authority Failure" in verdict["reason"]
@@ -216,7 +218,7 @@ def test_unknown_zone_is_blocked():
     """Zone Safety Check branch: zone_id has no Redis-backed state at all."""
     claim = _claim(zone_id="ZONE-99")
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=None, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=None, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert "Safety Violation" in verdict["reason"]
@@ -235,7 +237,8 @@ def test_missing_sa_admissible_role_on_zone_safety_is_rejected():
     claim = _claim()
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=[AuthorityRoleType.RTO]
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=[AuthorityRoleType.RTO],
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "NO_GO"
@@ -256,6 +259,7 @@ def test_sa_admissible_role_present_passes_zone_safety():
         issuer_record=SUPERINTENDENT,
         zone_record=LOW_HAZARD_ZONE,
         issuer_roles=[AuthorityRoleType.RTO, AuthorityRoleType.SA],
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert verdict["decision"] == "GO"
@@ -290,10 +294,12 @@ def test_adjudicate_returns_deterministic_verdict():
     claim = _claim()
 
     first = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
     second = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
 
     assert first == second
@@ -376,7 +382,7 @@ def test_lift_operation_in_high_hazard_zone_reason_is_unchanged():
 def test_non_lift_claim_with_missing_hazard_level_is_unchanged():
     zone = ZoneRecord(hazard_level=None, active_crane=False)
 
-    verdict = adjudicate(_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(_claim(), issuer_record=SUPERINTENDENT, zone_record=zone, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
@@ -407,7 +413,7 @@ def _permit(permit_type: str, zone_id: str = "ZONE-01") -> dict:
 def test_nominal_civil_lift_label_without_permit_is_rejected_at_rule_0():
     claim = _claim(action_type="LIFT_OPERATION", work_type="NOMINAL_CIVIL")
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-PTW-01"
@@ -455,7 +461,7 @@ def test_nominal_civil_lift_label_with_wrong_permit_type_is_rejected_at_rule_0()
 def test_nominal_civil_material_entry_without_permit_is_still_cleared():
     claim = _claim(work_type="NOMINAL_CIVIL")
 
-    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES)
+    verdict = adjudicate(claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None

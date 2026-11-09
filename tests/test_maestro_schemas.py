@@ -8,6 +8,8 @@ decision must always carry a matching conflicting_condition (never a
 standalone verdict), and every alert must carry an escalation_contact
 (Escalation Requirement).
 """
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
 
@@ -31,6 +33,10 @@ HIGH_HAZARD_ZONE = ZoneRecord(hazard_level="HIGH", active_crane=True)
 # SA added so this file's GO-path tests still reach GO through
 # zone_safety_check.
 SUPERINTENDENT_ROLES = [AuthorityRoleType.RTO, AuthorityRoleType.SA]
+
+# Rule 0's permit-window time (adjudicate()'s required evaluation_time,
+# 2026-11-09). No claim in this file reaches the window check.
+EVALUATION_TIME = datetime(2026, 11, 9, 4, 0, 0, tzinfo=timezone.utc)
 
 PASSING_RULE = RuleConditionResult(rule_id="authority_check", passed=True, reason="Authority Validated")
 FAILING_RULE = RuleConditionResult(
@@ -134,6 +140,7 @@ def test_from_evidence_record_builds_from_real_evidence_go():
         issuer_record=SUPERINTENDENT,
         zone_record=LOW_HAZARD_ZONE,
         issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
     evidence = emit_evidence(claim_payload, verdict)
 
@@ -166,6 +173,7 @@ def test_from_evidence_record_builds_from_real_evidence_no_go():
         issuer_record=SUPERINTENDENT,
         zone_record=None,
         issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
     evidence = emit_evidence(claim_payload, verdict)
 
@@ -196,7 +204,8 @@ def test_from_evidence_record_carries_eptw_reason_code_through():
         ptw_context=None,
     )
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=EVALUATION_TIME,
     )
     evidence = emit_evidence(claim_payload, verdict)
 

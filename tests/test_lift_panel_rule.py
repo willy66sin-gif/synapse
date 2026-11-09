@@ -82,6 +82,9 @@ PANEL_WORK_WITHOUT_CONSENT = {
 TEST_EFFECTIVE_DATE = "2026-11-01"
 WELL_BEFORE = datetime(2026, 10, 1, 4, 0, 0, tzinfo=timezone.utc)
 WELL_AFTER = datetime(2026, 12, 1, 4, 0, 0, tzinfo=timezone.utc)
+# Rule 0's permit-window time (adjudicate()'s required evaluation_time,
+# 2026-11-09). No claim in this file reaches Rule 0's window check.
+EVALUATION_TIME = datetime(2026, 11, 9, 4, 0, 0, tzinfo=timezone.utc)
 LAST_SECOND_BEFORE_IN_SINGAPORE = datetime(2026, 10, 31, 15, 59, 59, tzinfo=timezone.utc)
 FIRST_SECOND_OF_DAY_IN_SINGAPORE = datetime(2026, 10, 31, 16, 0, 0, tzinfo=timezone.utc)
 
@@ -322,7 +325,7 @@ def test_adjudicate_rejects_panel_work_without_consent_as_r_lift_01(effective_da
     effective_date()
     claim = _claim(**PANEL_WORK_WITHOUT_CONSENT)
 
-    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER)
+    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-LIFT-01"
@@ -341,7 +344,7 @@ def test_adjudicate_passes_as_of_through_so_an_earlier_claim_is_go(effective_dat
     effective_date()
     claim = _claim(**PANEL_WORK_WITHOUT_CONSENT)
 
-    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_BEFORE)
+    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_BEFORE, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
@@ -353,7 +356,7 @@ def test_adjudicate_without_as_of_fails_an_in_scope_claim_closed(effective_date)
     """A caller that omits as_of gets a fail-closed NO_GO, never a silent 'now'."""
     effective_date()
 
-    verdict = adjudicate(_claim(**PANEL_WORK_WITHOUT_CONSENT), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA)
+    verdict = adjudicate(_claim(**PANEL_WORK_WITHOUT_CONSENT), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-LIFT-01"
@@ -363,7 +366,7 @@ def test_adjudicate_without_as_of_fails_an_in_scope_claim_closed(effective_date)
 def test_adjudicate_clears_panel_work_with_consent():
     claim = _claim(**{**PANEL_WORK_WITHOUT_CONSENT, "oem_consent_obtained": True})
 
-    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER)
+    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "GO"
     assert verdict["reason_code"] is None
@@ -377,7 +380,7 @@ def test_adjudicate_clears_panel_work_with_consent():
 
 def test_only_the_lift_panel_trace_entry_carries_grounding_and_as_of():
     """Rules 0-2 keep exactly the three keys they always had."""
-    verdict = adjudicate(_claim(), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER)
+    verdict = adjudicate(_claim(), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER, evaluation_time=EVALUATION_TIME)
 
     for entry in verdict["rule_trace"][:3]:
         assert set(entry) == {"rule_id", "passed", "reason"}
@@ -389,7 +392,7 @@ def test_an_earlier_rule_failure_is_reported_ahead_of_r_lift_01(effective_date):
     effective_date()
     claim = _claim(**PANEL_WORK_WITHOUT_CONSENT)
 
-    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, issuer_roles=[], as_of=WELL_AFTER)
+    verdict = adjudicate(claim, SUPERINTENDENT, LOW_HAZARD_ZONE, issuer_roles=[], as_of=WELL_AFTER, evaluation_time=EVALUATION_TIME)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-AUTH-03"
@@ -762,7 +765,8 @@ async def test_fetch_earliest_adjudication_record_returns_none_for_an_unknown_cl
 def test_outbound_alert_accepts_a_grounded_rule_trace_entry_and_ungrounded_ones_alike(effective_date):
     effective_date()
     verdict = adjudicate(
-        _claim(**PANEL_WORK_WITHOUT_CONSENT), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER
+        _claim(**PANEL_WORK_WITHOUT_CONSENT), SUPERINTENDENT, LOW_HAZARD_ZONE, RTO_AND_SA, as_of=WELL_AFTER,
+        evaluation_time=EVALUATION_TIME,
     )
     evidence = {
         "claim_id": verdict["claim_id"],

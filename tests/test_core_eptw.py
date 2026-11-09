@@ -241,7 +241,7 @@ def test_adjudicate_rejects_before_authority_check_even_runs():
     """
     claim = _claim(issuer_id="USR-UNKNOWN", ptw_context=None)
 
-    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES)
+    verdict = adjudicate(claim, issuer_record=None, zone_record=LOW_HAZARD_ZONE, issuer_roles=NO_ROLES, evaluation_time=NOW)
 
     assert verdict["decision"] == "NO_GO"
     assert verdict["reason_code"] == "R-PTW-01"
@@ -277,7 +277,8 @@ def test_adjudicate_nominal_civil_unaffected_by_eptw_gate():
     claim = _claim(work_type=WorkType.NOMINAL_CIVIL, ptw_context=None, action_type="MATERIAL_ENTRY")
 
     verdict = adjudicate(
-        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES
+        claim, issuer_record=SUPERINTENDENT, zone_record=LOW_HAZARD_ZONE, issuer_roles=SUPERINTENDENT_ROLES,
+        evaluation_time=NOW,
     )
 
     assert verdict["decision"] == "GO"
@@ -331,3 +332,42 @@ def test_naive_evaluation_time_raises():
 def test_reaching_the_window_check_without_an_evaluation_time_raises():
     with pytest.raises(ValueError, match="evaluation_time is required"):
         verify_ptw_precondition(_claim(), issuer_roles=SUPERINTENDENT_ROLES, evaluation_time=None)
+
+
+# --- adjudicate(): evaluation_time is required (2026-11-09) ---
+# Checked by adjudicate() itself, before any rule runs, so a NOMINAL_CIVIL
+# claim that would never reach Rule 0's window check still needs one.
+
+_NOMINAL_CLAIM = dict(work_type=WorkType.NOMINAL_CIVIL, ptw_context=None, action_type="MATERIAL_ENTRY")
+
+
+def test_adjudicate_without_evaluation_time_is_a_type_error():
+    with pytest.raises(TypeError, match="evaluation_time"):
+        adjudicate(
+            _claim(**_NOMINAL_CLAIM),
+            issuer_record=SUPERINTENDENT,
+            zone_record=LOW_HAZARD_ZONE,
+            issuer_roles=SUPERINTENDENT_ROLES,
+        )
+
+
+def test_adjudicate_with_none_evaluation_time_raises():
+    with pytest.raises(ValueError, match="evaluation_time is required"):
+        adjudicate(
+            _claim(**_NOMINAL_CLAIM),
+            issuer_record=SUPERINTENDENT,
+            zone_record=LOW_HAZARD_ZONE,
+            issuer_roles=SUPERINTENDENT_ROLES,
+            evaluation_time=None,
+        )
+
+
+def test_adjudicate_with_naive_evaluation_time_raises():
+    with pytest.raises(ValueError, match="evaluation_time must be timezone-aware"):
+        adjudicate(
+            _claim(**_NOMINAL_CLAIM),
+            issuer_record=SUPERINTENDENT,
+            zone_record=LOW_HAZARD_ZONE,
+            issuer_roles=SUPERINTENDENT_ROLES,
+            evaluation_time=datetime(2026, 11, 9, 12, 0),
+        )
