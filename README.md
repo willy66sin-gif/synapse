@@ -374,8 +374,8 @@ See `CLAUDE.md`'s `## Repository Layout` section — kept in sync with the actua
 
 ## Status
 
-484/484 tests passing (verified 2026-10-11 at code commit
-`d8f76180c4a1c3076d9a0bc7810396dc3947e40b`; the 317/317 figure this section
+508/508 tests passing (verified 2026-11-09 at code commit
+`bf62a3a6b4dad17541346893be5d3bba71953b1f`; the 317/317 figure this section
 previously stated was verified 2026-09-16 at
 `53c7b376a1dced228f90a68cd242a4651682d44c`). See
 `CLAUDE.md`'s `## Open Items` for the current, full list of known gaps and pending
